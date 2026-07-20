@@ -48,7 +48,8 @@ app.get('/api/suggest', async (req, res) => {
     if (!q) return res.json([]);
     try {
         const searchUrl = `${currentBaseUrl}/?s=${encodeURIComponent(q)}`;
-        const searchRes = await axios.get(searchUrl, { headers: HEADERS, timeout: 8000 });
+        const proxyRes = await axios.get(https://api.allorigins.win/get?url=${encodeURIComponent(searchUrl)});
+const searchRes = { data: proxyRes.data.contents, request: { res: { responseUrl: currentBaseUrl } } };
         checkAndUpdateDomain(searchRes.request.res.responseUrl);
         const $ = cheerio.load(searchRes.data);
         let suggestions = [];
@@ -76,7 +77,8 @@ app.get('/api/search', async (req, res) => {
         if (!movieUrl) {
             if (!movieName) return res.status(400).json({ error: "Movie name required" });
             const searchUrl = `${currentBaseUrl}/?s=${encodeURIComponent(movieName)}`;
-            const searchRes = await axios.get(searchUrl, { headers: HEADERS, timeout: 10000 });
+            const proxyRes = await axios.get(https://api.allorigins.win/get?url=${encodeURIComponent(searchUrl)});
+const searchRes = { data: proxyRes.data.contents, request: { res: { responseUrl: currentBaseUrl } } };
             checkAndUpdateDomain(searchRes.request.res.responseUrl);
 
             const $ = cheerio.load(searchRes.data);
@@ -87,10 +89,8 @@ app.get('/api/search', async (req, res) => {
             titleText = firstResult.text().trim();
         }
 
-        const detailsRes = await axios.get(movieUrl, { 
-            headers: HEADERS, 
-            timeout: 10000 
-        });
+        const proxyRes = await axios.get(`https://api.allorigins.win/get?url=${encodeURIComponent(movieUrl)}`);
+const detailsRes = { data: proxyRes.data.contents };
 
 const fs = require("fs");
 fs.writeFileSync("movie-page.html", detailsRes.data);
@@ -181,7 +181,8 @@ app.post('/api/extract', async (req, res) => {
                 const targetQualityMatch = (linkObj.quality || "").match(/(480p|720p|1080p|2160p|4k)/i);
                 const targetResolution = targetQualityMatch ? targetQualityMatch[0].toLowerCase() : null;
 
-                const linkRes = await axios.get(urlToFetch, { headers: HEADERS, timeout: 12000 });
+                const proxyRes = await axios.get(https://api.allorigins.win/get?url=${encodeURIComponent(urlToFetch)});
+const linkRes = { data: proxyRes.data.contents };
                 const $ = cheerio.load(linkRes.data);
                 let urls = [];
                 let currentEpisode = linkObj.episode; 
@@ -236,7 +237,8 @@ app.post('/api/extract', async (req, res) => {
 
         const hubPromises = allInterUrls.map(async (item) => {
             try {
-                const hubRes = await axios.get(item.genUrl, { headers: HEADERS, timeout: 10000 });
+                const proxyRes = await axios.get(https://api.allorigins.win/get?url=${encodeURIComponent(item.genUrl)});
+const hubRes = { data: proxyRes.data.contents };
                 const $ = cheerio.load(hubRes.data);
                 let genUrls = [];
                 const downloadBtn = $('#download').attr('href');
