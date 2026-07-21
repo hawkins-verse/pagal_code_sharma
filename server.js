@@ -30,11 +30,21 @@ app.post('/api/update-url', (req, res) => {
     }
 });
 
-// 🔥 JADOO YAHAN HAI: Yeh function har request ko proxy ke through bhejega
+// 🔥 CCTV CAMERA INSTALLED HERE 🔥
 async function fetchViaProxy(targetUrl) {
-    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`;
-    const res = await axios.get(proxyUrl);
-    return res.data.contents; // Direct HTML nikal liya
+    try {
+        console.log("-> Searching URL:", targetUrl);
+        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`;
+        const res = await axios.get(proxyUrl, { timeout: 15000 });
+        
+        if (!res.data.contents || res.data.contents.trim() === "") {
+            console.log("-> ALERT: Proxy returned empty HTML!");
+        }
+        return res.data.contents; 
+    } catch (error) {
+        console.error("-> PROXY CRASH ERROR:", error.message);
+        return "";
+    }
 }
 
 app.get('/api/suggest', async (req, res) => {
@@ -42,7 +52,10 @@ app.get('/api/suggest', async (req, res) => {
     if (!q) return res.json([]);
     try {
         const searchUrl = `${currentBaseUrl}/?s=${encodeURIComponent(q)}`;
-        const html = await fetchViaProxy(searchUrl); // Proxy use kiya
+        const html = await fetchViaProxy(searchUrl); 
+        
+        if (!html) return res.json([]); // Agar HTML khali hai toh empty bhejo
+        
         const $ = cheerio.load(html);
         let suggestions = [];
         $('article.post').each((i, el) => {
@@ -53,8 +66,13 @@ app.get('/api/suggest', async (req, res) => {
             let img = $(el).find('img').first().attr('src');
             if (title && link) suggestions.push({ title, link, img });
         });
+        
+        console.log(`-> Found ${suggestions.length} movies for query: ${q}`);
         res.json(suggestions);
-    } catch (e) { res.json([]); }
+    } catch (e) { 
+        console.error("-> Suggest Route Error:", e.message);
+        res.json([]); 
+    }
 });
 
 app.get('/api/search', async (req, res) => {
@@ -68,7 +86,7 @@ app.get('/api/search', async (req, res) => {
         if (!movieUrl) {
             if (!movieName) return res.status(400).json({ error: "Movie name required" });
             const searchUrl = `${currentBaseUrl}/?s=${encodeURIComponent(movieName)}`;
-            const html = await fetchViaProxy(searchUrl); // Proxy use kiya
+            const html = await fetchViaProxy(searchUrl); 
             const $ = cheerio.load(html);
             const firstResult = $('article.post h3.entry-title a').first();
             if (firstResult.length === 0) return res.json({ error: "Movie not found" });
@@ -77,7 +95,7 @@ app.get('/api/search', async (req, res) => {
             titleText = firstResult.text().trim();
         }
 
-        const detailsHtml = await fetchViaProxy(movieUrl); // Proxy use kiya
+        const detailsHtml = await fetchViaProxy(movieUrl); 
         const $$ = cheerio.load(detailsHtml);
         
         let qualities = new Set();
@@ -152,7 +170,7 @@ app.post('/api/extract', async (req, res) => {
                 const targetQualityMatch = (linkObj.quality || "").match(/(480p|720p|1080p|2160p|4k)/i);
                 const targetResolution = targetQualityMatch ? targetQualityMatch[0].toLowerCase() : null;
 
-                const html = await fetchViaProxy(urlToFetch); // Proxy use kiya
+                const html = await fetchViaProxy(urlToFetch); 
                 const $ = cheerio.load(html);
                 let urls = [];
                 let currentEpisode = linkObj.episode; 
@@ -201,7 +219,7 @@ app.post('/api/extract', async (req, res) => {
 
         const hubPromises = allInterUrls.map(async (item) => {
             try {
-                const html = await fetchViaProxy(item.genUrl); // Proxy use kiya
+                const html = await fetchViaProxy(item.genUrl); 
                 const $ = cheerio.load(html);
                 let genUrls = [];
                 const downloadBtn = $('#download').attr('href');
@@ -228,7 +246,7 @@ app.post('/api/extract', async (req, res) => {
             seenGenerators.add(item.url);
 
             try {
-                const html = await fetchViaProxy(item.url); // Proxy use kiya
+                const html = await fetchViaProxy(item.url); 
 
                 const pixelScriptMatch = html.match(/var\s+pxl\s*=\s*["']([^"']+)["']/);
                 const jsPixelUrl = pixelScriptMatch ? pixelScriptMatch[1] : null;
@@ -279,7 +297,7 @@ app.post('/api/extract', async (req, res) => {
         const doubleBypassPromises = rawFinalLinks.map(async (linkObj) => {
             if (linkObj.server.toLowerCase().includes('10gbps') || linkObj.url.toLowerCase().includes('10gbps')) {
                 try {
-                    const bypassHtml = await fetchViaProxy(linkObj.url); // Proxy use kiya
+                    const bypassHtml = await fetchViaProxy(linkObj.url); 
                     const $bypass = cheerio.load(bypassHtml);
                     let finalRealUrl = $bypass('a.btn, a.download-button').first().attr('href'); 
                     if(finalRealUrl) return { ...linkObj, url: finalRealUrl, server: linkObj.server + " (Unlocked)" };
