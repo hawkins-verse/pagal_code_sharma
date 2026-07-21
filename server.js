@@ -169,6 +169,15 @@ app.post('/api/extract', async (req, res) => {
     let finalLinks = [];
     let seenGenerators = new Set();
 
+    // 🔥 Helper: 4K aur 2160p ko ek hi Resolution treat karne ke liye
+    const getNormalizedRes = (str) => {
+        if (!str) return null;
+        let match = str.match(/(480p|720p|1080p|2160p|4k)/i);
+        if (!match) return null;
+        let res = match[0].toLowerCase();
+        return res === '4k' ? '2160p' : res; // 4k ko humesha 2160p padhega
+    };
+
     try {
         const interPromises = links.map(async (linkObj) => {
             try {
@@ -177,9 +186,8 @@ app.post('/api/extract', async (req, res) => {
                     urlToFetch = `https://hubcloud.one/drive/${urlToFetch.split("/").pop()}`;
                 }
 
-                // 🔥 User ne jo quality mangi hai usko pehchano (e.g., "1080p")
-                const targetQualityMatch = (linkObj.quality || "").match(/(480p|720p|1080p|2160p|4k)/i);
-                const targetResolution = targetQualityMatch ? targetQualityMatch[0].toLowerCase() : null;
+                // 🔥 User ne jo quality mangi hai usko strictly pehchano
+                const targetResolution = getNormalizedRes(linkObj.quality || "");
 
                 const linkRes = await axios.get(urlToFetch, { headers: HEADERS, timeout: 12000 });
                 const $ = cheerio.load(linkRes.data);
@@ -210,13 +218,13 @@ app.post('/api/extract', async (req, res) => {
                             let aQMatch = text.match(/(480p|720p|1080p|2160p|4k)/i);
                             if (aQMatch) aQuality = aQMatch[0].toLowerCase();
 
-                            // 🚨 MAIN FIX: STRICT QUALITY FILTER 🚨
-                            // Agar user ne specific resolution manga hai, aur page ke andar link
-                            // kisi aur resolution ka hai, toh usey ignore kar do.
+                            // 🚨 MAIN FIX: ADVANCED STRICT QUALITY FILTER 🚨
                             if (targetResolution) {
-                                let aResMatch = aQuality.match(/(480p|720p|1080p|2160p|4k)/i);
-                                if (aResMatch && aResMatch[0].toLowerCase() !== targetResolution) {
-                                    return; // Yeh link galat quality ki hai, isko chhod do
+                                let extractedRes = getNormalizedRes(aQuality);
+                                
+                                // Agar link ka resolution clear hai aur target se match NAHI karta, toh turant reject karo
+                                if (extractedRes && extractedRes !== targetResolution) {
+                                    return; 
                                 }
                             }
 
@@ -343,8 +351,14 @@ app.post('/api/extract', async (req, res) => {
 
         rawFinalLinks = await Promise.all(doubleBypassPromises);
 
+        // 🔥 DEDUPLICATION FIX: Ek hi Server ke 2 link (Duplicate Mirrors) hata diye jayenge
         rawFinalLinks.forEach(f => {
-            if (!finalLinks.some(exist => exist.url === f.url)) {
+            let isDuplicate = finalLinks.some(exist => 
+                exist.url === f.url || 
+                (exist.server === f.server && exist.episode === f.episode) 
+            );
+
+            if (!isDuplicate) {
                 finalLinks.push(f);
             }
         });
@@ -354,6 +368,5 @@ app.post('/api/extract', async (req, res) => {
 
     res.json({ finalLinks });
 });
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Server running at port ${PORT}`));
