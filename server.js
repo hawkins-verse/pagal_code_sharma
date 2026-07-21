@@ -30,17 +30,22 @@ app.post('/api/update-url', (req, res) => {
     }
 });
 
-// 🔥 CCTV CAMERA INSTALLED HERE 🔥
+// 🔥 NAYA PROXY SERVER (CodeTabs) 🔥
 async function fetchViaProxy(targetUrl) {
     try {
         console.log("-> Searching URL:", targetUrl);
-        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`;
+        
+        // Proxy change kar di: CodeTabs use kar rahe hain ab
+        const proxyUrl = `https://api.codetabs.com/v1/proxy?quest=${targetUrl}`;
+        
         const res = await axios.get(proxyUrl, { timeout: 15000 });
         
-        if (!res.data.contents || res.data.contents.trim() === "") {
+        // CodeTabs seedha HTML deta hai (contents variable nahi hota)
+        if (!res.data || typeof res.data !== 'string' || res.data.trim() === "") {
             console.log("-> ALERT: Proxy returned empty HTML!");
+            return "";
         }
-        return res.data.contents; 
+        return res.data; 
     } catch (error) {
         console.error("-> PROXY CRASH ERROR:", error.message);
         return "";
