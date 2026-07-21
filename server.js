@@ -169,13 +169,21 @@ app.post('/api/extract', async (req, res) => {
     let finalLinks = [];
     let seenGenerators = new Set();
 
-    // 🔥 Helper: 4K aur 2160p ko ek hi Resolution treat karne ke liye
-    const getNormalizedRes = (str) => {
-        if (!str) return null;
-        let match = str.match(/(480p|720p|1080p|2160p|4k)/i);
-        if (!match) return null;
-        let res = match[0].toLowerCase();
-        return res === '4k' ? '2160p' : res; // 4k ko humesha 2160p padhega
+    // 🔥 SMART TAG EXTRACTOR (1080p ke alag-alag variants pehchanne ke liye)
+    const getQualityTags = (str) => {
+        if (!str) return { res: null, tags: [] };
+        
+        let resMatch = str.match(/(480p|720p|1080p|2160p|4k)/i);
+        let res = resMatch ? resMatch[0].toLowerCase() : null;
+        if (res === '4k') res = '2160p'; // 4k aur 2160p ko ek hi manega
+        
+        let tags = [];
+        if (/10-?bit/i.test(str)) tags.push('10bit');
+        if (/(hevc|x265)/i.test(str)) tags.push('hevc');
+        if (/\bhq\b/i.test(str)) tags.push('hq');
+        if (/\bhdr\b/i.test(str)) tags.push('hdr');
+        
+        return { res, tags };
     };
 
     try {
@@ -186,26 +194,26 @@ app.post('/api/extract', async (req, res) => {
                     urlToFetch = `https://hubcloud.one/drive/${urlToFetch.split("/").pop()}`;
                 }
 
-                // 🔥 User ne jo quality mangi hai usko strictly pehchano
-                const targetResolution = getNormalizedRes(linkObj.quality || "");
+                // 🔥 User ne jo exact quality (aur uske tags) mangi hai
+                const targetInfo = getQualityTags(linkObj.quality || "");
 
                 const linkRes = await axios.get(urlToFetch, { headers: HEADERS, timeout: 12000 });
                 const $ = cheerio.load(linkRes.data);
                 let urls = [];
                 let currentEpisode = linkObj.episode; 
-                let currentQuality = linkObj.quality; 
+                let currentQualityText = linkObj.quality; 
 
                 $('*').each((i, el) => {
                     const tagName = el.tagName.toLowerCase();
                     
-                    if (['p', 'div', 'h2', 'h3', 'h4', 'h5', 'span', 'strong', 'b'].includes(tagName)) {
+                    if (['p', 'div', 'h2', 'h3', 'h4', 'h5', 'span', 'strong', 'b', 'td', 'tr'].includes(tagName)) {
                         let text = $(el).text().replace(/\s+/g, ' ').trim();
-                        if (text.length > 0 && text.length < 80) {
+                        if (text.length > 0 && text.length < 150) {
                             let epMatch = text.match(/(?:[-:]\s*)?Ep(?:isode)?s?\s*[:\-]*\s*(\d+)/i);
                             if (epMatch) currentEpisode = `E${epMatch[1].padStart(2, '0')}`;
                             
                             let qMatch = text.match(/(480p|720p|1080p|2160p|4k)/i);
-                            if (qMatch) currentQuality = qMatch[0].toLowerCase();
+                            if (qMatch) currentQualityText = text; // Sirf resolution nahi, pura text save karo
                         }
                     }
 
@@ -213,18 +221,28 @@ app.post('/api/extract', async (req, res) => {
                         let href = $(el).attr('href');
                         if (href) {
                             let text = $(el).text().replace(/\s+/g, ' ').trim();
-                            let aQuality = currentQuality;
+                            let aQualityText = currentQualityText;
                             
-                            let aQMatch = text.match(/(480p|720p|1080p|2160p|4k)/i);
-                            if (aQMatch) aQuality = aQMatch[0].toLowerCase();
+                            if (/(480p|720p|1080p|2160p|4k)/i.test(text)) {
+                                aQualityText = text;
+                            }
 
-                            // 🚨 MAIN FIX: ADVANCED STRICT QUALITY FILTER 🚨
-                            if (targetResolution) {
-                                let extractedRes = getNormalizedRes(aQuality);
+                            // 🚨 MAIN FIX: ADVANCED STRICT TAG FILTER 🚨
+                            if (targetInfo.res) {
+                                let linkInfo = getQualityTags(aQualityText);
                                 
-                                // Agar link ka resolution clear hai aur target se match NAHI karta, toh turant reject karo
-                                if (extractedRes && extractedRes !== targetResolution) {
-                                    return; 
+                                // 1. Base Resolution Check (e.g., dono 1080p hone chahiye)
+                                if (linkInfo.res && linkInfo.res !== targetInfo.res) return;
+                                
+                                // 2. Tags Check (e.g., 10bit, hevc, hq). Ekdam strict match!
+                                const checkTags = ['10bit', 'hevc', 'hq', 'hdr'];
+                                for (let tag of checkTags) {
+                                    let wantsTag = targetInfo.tags.includes(tag);
+                                    let hasTag = linkInfo.tags.includes(tag);
+                                    
+                                    // Agar user ne 'hevc' manga hai aur link mein nahi hai, toh Reject!
+                                    // Ya user ne normal manga hai aur link mein 'hevc' hai, toh Reject!
+                                    if (wantsTag !== hasTag) return; 
                                 }
                             }
 
@@ -232,7 +250,7 @@ app.post('/api/extract', async (req, res) => {
                                 href = `https://hubcloud.one/drive/${href.split("/").pop()}`;
                             }
                             if (href.includes('hubcloud') || href.includes('gdflix') || href.includes('gamerxyt')) {
-                                urls.push({ genUrl: href, episode: currentEpisode, quality: aQuality });
+                                urls.push({ genUrl: href, episode: currentEpisode, quality: aQualityText });
                             }
                         }
                     }
@@ -351,7 +369,7 @@ app.post('/api/extract', async (req, res) => {
 
         rawFinalLinks = await Promise.all(doubleBypassPromises);
 
-        // 🔥 DEDUPLICATION FIX: Ek hi Server ke 2 link (Duplicate Mirrors) hata diye jayenge
+        // 🔥 DEDUPLICATION FIX (Extra duplicate links ko safa karne ke liye)
         rawFinalLinks.forEach(f => {
             let isDuplicate = finalLinks.some(exist => 
                 exist.url === f.url || 
