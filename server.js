@@ -172,7 +172,7 @@ app.get('/api/search', async (req, res) => {
         res.status(500).json({ error: e.message });
     }
 });
-// 🔥 THE MASTERMIND EXTRACTION LOGIC (Now with Auto-Episode Detection!) 🔥
+// 🔥 THE MASTERMIND EXTRACTION LOGIC (BULLETPROOF OLD & NEW MOVIES FIX) 🔥
 app.post('/api/extract', async (req, res) => {
     const { links } = req.body;
     let finalLinks = [];
@@ -197,7 +197,9 @@ app.post('/api/extract', async (req, res) => {
                 if (targetRes === '4k') targetRes = '2160p';
                 let targetTags = ['hevc', '10bit', 'hq', 'x264', 'x265', 'hdr'].filter(t => lockedQuality.toLowerCase().includes(t));
 
-                if (urlToFetch.includes('hubcloud') || urlToFetch.includes('gdflix')) {
+                // 🔥 FIX 1: Naye Redirectors aur Cloud Hosts ko direct bypass list mein daala
+                const directHosts = ['hubcloud', 'gdflix', 'vifix', 'fastdl', 'filepress', 'gofile'];
+                if (directHosts.some(host => urlToFetch.toLowerCase().includes(host))) {
                     return [{ genUrl: urlToFetch, episode: lockedEpisode, quality: lockedQuality }];
                 }
 
@@ -210,31 +212,31 @@ app.post('/api/extract', async (req, res) => {
                     let href = $(el).attr('href');
                     if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
 
-                    const isValidHop = href.includes('hubcloud') || href.includes('gdflix') || href.includes('gamerxyt') || href.includes('m4ulinks');
+                    // 🔥 FIX 2: Purani movies ke naye domains ko valid list mein add kiya
+                    const validDomains = ['hubcloud', 'gdflix', 'gamerxyt', 'm4ulinks', 'vifix', 'fastdl', 'filepress', 'gofile', 'dropgalaxy', 'clicknupload'];
+                    const isValidHop = validDomains.some(domain => href.toLowerCase().includes(domain));
                     
                     if (isValidHop) {
                         let headerText = "";
                         let curr = $(el).parent();
                         
-                        // Upar ki 6 lines mein closest Heading dhoondho (Resolution ya Episode)
-                        for (let k = 0; k < 6; k++) {
-                            if (!curr.length || curr.prop('tagName') === 'HR') break;
-                            let txt = curr.text().toLowerCase();
-                            // Resolution ya Episode text ko pakadna
+                        while (curr.length > 0 && curr.prop('tagName') !== 'BODY') {
+                            let txt = curr.text().toLowerCase().replace(/\s+/g, ' ').trim();
                             if (/(480p|720p|1080p|2160p|4k|episode|ep\s*\d+|e\d+)/i.test(txt)) {
-                                headerText = txt;
-                                break;
+                                let resCount = (txt.match(/480p|720p|1080p|2160p|4k/g) || []).length;
+                                if (txt.length < 350 && resCount <= 3) {
+                                    headerText = txt;
+                                    break;
+                                }
                             }
-                            curr = curr.prev();
+                            curr = curr.parent();
                         }
                         
                         if (!headerText) headerText = $(el).text().toLowerCase() + " " + $(el).parent().text().toLowerCase();
                         
-                        // 🔥 WEB SERIES EPISODE EXTRACTOR 🔥
                         let linkEpisode = lockedEpisode;
                         let epMatch = headerText.match(/(?:episodes?|ep)\s*[:-]*\s*(\d+)/i);
                         if (epMatch) {
-                            // Format: Episode 01, Episode 02 (taki sorting perfectly ho)
                             linkEpisode = `Episode ${epMatch[1].padStart(2, '0')}`;
                         }
 
@@ -243,15 +245,11 @@ app.post('/api/extract', async (req, res) => {
                 });
 
                 let matchedUrls = [];
-
-                // 🚨 WEB SERIES DETECTOR: Agar select kiye gaye naam me TV Show/Season ho ya URL page par Episode dikh jaye
                 let isWebSeries = /season|episode|tv show/i.test(lockedQuality) || urlObjs.some(obj => /episode|ep\s*\d+/i.test(obj.headerText));
 
                 if (isWebSeries) {
-                    // Web Series ke page par saare links accept honge kyunki unpe sirf Episode no. hota hai, size nahi!
                     matchedUrls = urlObjs;
                 } else {
-                    // Movie Filter Logic
                     if (targetSizeNum) {
                         matchedUrls = urlObjs.filter(obj => obj.headerText.includes(targetSizeNum));
                     }
@@ -275,24 +273,26 @@ app.post('/api/extract', async (req, res) => {
                     }
                 }
 
+                // 🔥 EMERGENCY FALLBACK: Agar size bilkul match na ho, tab bhi pehla valid link utha lega, Error nahi dega!
+                if (matchedUrls.length === 0 && urlObjs.length > 0) {
+                    matchedUrls = [urlObjs[0]]; 
+                }
+
                 let urls = [];
                 matchedUrls.forEach(obj => {
                     let href = obj.href;
                     if (/^https:\/\/vifix\.site\/hubcloud\/([a-z0-9]+)$/i.test(href)) {
                         href = `https://hubcloud.one/drive/${href.split("/").pop()}`;
                     }
-                    // Yahan hum specific Episode assign kar rahe hain
                     urls.push({ genUrl: href, episode: obj.linkEpisode, quality: lockedQuality });
                 });
 
-                // Remove exact duplicates
                 return urls.filter((v, i, a) => a.findIndex(t => (t.genUrl === v.genUrl)) === i);
             } catch (e) { return []; }
         });
         
         const allInterUrls = (await Promise.all(interPromises)).flat();
 
-        // Step 3: HubCloud Bypass
         const hubPromises = allInterUrls.map(async (item) => {
             try {
                 const hubRes = await axios.get(item.genUrl, { headers: HEADERS, timeout: 10000 });
@@ -308,8 +308,15 @@ app.post('/api/extract', async (req, res) => {
                         genUrls.push({ url: href, episode: item.episode, quality: item.quality });
                     }
                 });
+
+                if (genUrls.length === 0) {
+                    genUrls.push({ url: item.genUrl, episode: item.episode, quality: item.quality });
+                }
+
                 return genUrls;
-            } catch (e) { return []; }
+            } catch (e) { 
+                return [{ url: item.genUrl, episode: item.episode, quality: item.quality }];
+            }
         });
         
         let uniqueGenUrls = [];
@@ -318,7 +325,6 @@ app.post('/api/extract', async (req, res) => {
             if(!seenGen.has(item.url)){ seenGen.add(item.url); uniqueGenUrls.push(item); }
         });
 
-        // Step 4: Final Links Extraction
         const genPromises = uniqueGenUrls.map(async (item) => {
             if (seenGenerators.has(item.url)) return [];
             seenGenerators.add(item.url);
@@ -337,19 +343,26 @@ app.post('/api/extract', async (req, res) => {
                     if (!href || !href.startsWith('http')) return;
 
                     const lowerHref = href.toLowerCase();
-                    const blacklist = ['t.me', 'telegram', '/tg/', 'whatsapp', 'discord'];
-                    if (blacklist.some(term => lowerHref.includes(term))) return;
+                    const lowerText = text.toLowerCase();
+                    const className = ($(a).attr('class') || '').toLowerCase();
+                    
+                    // Ad blockers
+                    const blacklist = ['t.me', 'telegram', '/tg/', 'whatsapp', 'discord', 'vpn', 'ads', 'betting', 'casino'];
+                    if (blacklist.some(term => lowerHref.includes(term) || lowerText.includes(term))) return;
 
                     const isDirectFile = /\.(zip|rar|7z|mkv|mp4|avi|mov|pdf|doc|docx)$/i.test(href);
                     const isCloudflare = lowerHref.includes("r2.dev") || lowerHref.includes("cloudflare") || lowerHref.includes("workers.dev");
                     const isDrive = lowerHref.includes("googleusercontent.com") || lowerHref.includes("drive.google.com");
                     const isExternal = lowerHref.includes("mediafire") || lowerHref.includes("mega.nz") || lowerHref.includes("dropbox");
                     const isPixel = lowerHref.includes("pixeldrain");
-                    const hasLegacy = ['10gbps', 'zipdisk', 'ddl', 'fsl', 'server', 'buzz'].some(ind => lowerHref.includes(ind) || text.toLowerCase().includes(ind));
+                    const hasLegacy = ['10gbps', 'zipdisk', 'ddl', 'fsl', 'server', 'buzz', 'gofile', 'clicknupload', 'filepress'].some(ind => lowerHref.includes(ind) || lowerText.includes(ind));
                     
-                    if (isDirectFile || isCloudflare || isDrive || isExternal || isPixel || hasLegacy) {
+                    // 🔥 FIX 3: Catch-All for generic download buttons on older pages
+                    const isGenericBtn = (className.includes('btn') || className.includes('button') || lowerText.includes('download')) && lowerHref.startsWith('http');
+                    
+                    if (isDirectFile || isCloudflare || isDrive || isExternal || isPixel || hasLegacy || isGenericBtn) {
                         let exactName = text.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
-                        if(!exactName) exactName = "Direct File Server";
+                        if(!exactName || exactName.length > 30) exactName = "Download Server";
 
                         if (isPixel) {
                             if (jsPixelUrl) href = jsPixelUrl;
@@ -384,18 +397,15 @@ app.post('/api/extract', async (req, res) => {
 
         rawFinalLinks = await Promise.all(doubleBypassPromises);
 
-        // Duplicate links hatana
         rawFinalLinks.forEach(f => {
             let isDuplicate = finalLinks.some(exist => exist.url === f.url);
             if (!isDuplicate) finalLinks.push(f);
         });
 
-        // 🔥 SORTING BY EPISODE (Episode 01, Episode 02 ekdum line se aayenge)
         finalLinks.sort((a, b) => a.episode.localeCompare(b.episode));
     } catch (e) { console.error("Extraction error:", e.message); }
 
     res.json({ finalLinks });
 });
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Server running at port ${PORT}`));
