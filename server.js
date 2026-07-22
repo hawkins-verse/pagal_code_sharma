@@ -64,7 +64,6 @@ app.get('/api/suggest', async (req, res) => {
     } catch (e) { res.json([]); }
 });
 
-// 🌟 100x DEEP SCAN SEARCH LOGIC - STRICT BARRIERS REMOVED 🌟
 app.get('/api/search', async (req, res) => {
     const movieName = req.query.q;
     const movieUrlParam = req.query.url;
@@ -92,23 +91,19 @@ app.get('/api/search', async (req, res) => {
             timeout: 10000 
         });
 
-const fs = require("fs");
-fs.writeFileSync("movie-page.html", detailsRes.data);
-
-const $$ = cheerio.load(detailsRes.data);
+        const $$ = cheerio.load(detailsRes.data);
         
         let qualities = new Set();
         let downloadLinks = [];
         let currentQuality = "Default Quality";
 
-        // Pure page ko accurately padhne ke liye logic
         $$('h2, h3, h4, h5, h6, p, div, span, strong, b, a').each((i, el) => {
             const tagName = el.tagName.toLowerCase();
             const text = $$(el).text().replace(/\s+/g, ' ').trim();
 
-            // 1. Agar element Text/Heading hai
             if (tagName !== 'a') {
-                if (/(480p|720p|1080p|2160p|4k)/i.test(text) && text.length > 5 && text.length < 80) {
+                // 🔥 FIXED: Ab exact pura naam pakdega, chahe wo Movie ho ya Web Series (Season/Episode)
+                if (/(480p|720p|1080p|2160p|4k|Season|Episode|Pack|Complete)/i.test(text) && text.length > 3 && text.length < 150) {
                     if (!text.toLowerCase().includes('you may also like') && !text.toLowerCase().includes('related')) {
                         currentQuality = text.replace(/(Download|Links|Here|Now|-)/gi, '').trim();
                         qualities.add(currentQuality);
@@ -116,7 +111,6 @@ const $$ = cheerio.load(detailsRes.data);
                 }
             }
 
-            // 2. Agar element Link (anchor tag) hai
             if (tagName === 'a') {
                 const href = $$(el).attr('href');
                 if (!href || href.startsWith('#') || href.includes('tag=')) return;
@@ -124,7 +118,6 @@ const $$ = cheerio.load(detailsRes.data);
                 const hrefLower = href.toLowerCase();
                 const className = ($$(el).attr('class') || '').toLowerCase();
                 
-                // Sirf Download Links pehchanne ka tarika
                 const isDownloadLink = 
                     hrefLower.includes('hubcloud') || hrefLower.includes('m4ulinks') || 
                     hrefLower.includes('vifix') || hrefLower.includes('gdflix') || 
@@ -132,14 +125,15 @@ const $$ = cheerio.load(detailsRes.data);
                     text.toLowerCase().includes('download links');
 
                 const isTelegram =
-    hrefLower.includes('telegram') ||
-    hrefLower.includes('t.me') ||
-    hrefLower.includes('/tg/') ||
-    text.toLowerCase().includes('telegram') ||
-    text.toLowerCase().includes('download from telegram') ||
-    text.toLowerCase().includes('telegram group');
+                    hrefLower.includes('telegram') ||
+                    hrefLower.includes('t.me') ||
+                    hrefLower.includes('/tg/') ||
+                    text.toLowerCase().includes('telegram') ||
+                    text.toLowerCase().includes('download from telegram') ||
+                    text.toLowerCase().includes('telegram group');
 
-if (isDownloadLink && !isTelegram) {
+                if (isDownloadLink && !isTelegram) {
+                    // 🔥 FIXED: Web series ke Episodes perfectly nikalenge ab
                     let epMatch = text.match(/(E\d+|Ep\s*\d+|Episode\s*\d+|Pack|Season\s*\d+)/i);
                     let episode = epMatch ? epMatch[0].toUpperCase() : 'Movie';
 
@@ -149,7 +143,7 @@ if (isDownloadLink && !isTelegram) {
                     }
 
                     downloadLinks.push({ 
-                        quality: currentQuality, 
+                        quality: currentQuality, // Exact bada wala naam (e.g., "720p HEVC [750MB]")
                         episode: episode, 
                         url: resolveUrl(movieUrl, href) 
                     });
@@ -163,20 +157,10 @@ if (isDownloadLink && !isTelegram) {
     }
 });
 
-// Final Extraction Logic
 app.post('/api/extract', async (req, res) => {
     const { links } = req.body;
     let finalLinks = [];
     let seenGenerators = new Set();
-
-    // 🔥 SMART BASE RESOLUTION MATCHER
-    const getBaseRes = (str) => {
-        if (!str) return null;
-        let match = str.match(/(480p|720p|1080p|2160p|4k)/i);
-        if (!match) return null;
-        let res = match[0].toLowerCase();
-        return res === '4k' ? '2160p' : res; 
-    };
 
     try {
         const interPromises = links.map(async (linkObj) => {
@@ -186,44 +170,53 @@ app.post('/api/extract', async (req, res) => {
                     urlToFetch = `https://hubcloud.one/drive/${urlToFetch.split("/").pop()}`;
                 }
 
-                // User ne jo UI se select kiya hai
-                const targetRes = getBaseRes(linkObj.quality || "");
+                const targetQualityText = (linkObj.quality || "").toLowerCase();
 
                 const linkRes = await axios.get(urlToFetch, { headers: HEADERS, timeout: 12000 });
                 const $ = cheerio.load(linkRes.data);
                 let urls = [];
-                let currentEpisode = linkObj.episode; 
-                let currentQualityText = linkObj.quality; 
 
                 $('a').each((i, el) => {
                     let href = $(el).attr('href');
                     if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
 
-                    let text = $(el).text().replace(/\s+/g, ' ').trim();
-                    let aQualityText = currentQualityText;
+                    let text = $(el).text().replace(/\s+/g, ' ').trim().toLowerCase();
                     
-                    if (/(480p|720p|1080p|2160p|4k)/i.test(text)) {
-                        aQualityText = text; // Agar link mein resolution likha hai, toh usko pakdo
+                    // 🔥 SMART MATCHING LOGIC 🔥
+                    // Agar anchor tag par resolution likha hai (मतलब HubCloud ka Folder hai)
+                    let linkHasRes = /(480p|720p|1080p|2160p|4k)/i.test(text);
+                    
+                    if (linkHasRes) {
+                        let linkResMatch = text.match(/(480p|720p|1080p|2160p|4k)/i)[0];
+                        if (linkResMatch === '4k') linkResMatch = '2160p';
+                        
+                        let targetResMatch = targetQualityText.match(/(480p|720p|1080p|2160p|4k)/i);
+                        let targetRes = targetResMatch ? targetResMatch[0] : null;
+                        if (targetRes === '4k') targetRes = '2160p';
+                        
+                        // 1. Resolution Check
+                        if (targetRes && linkResMatch !== targetRes) return; 
+                        
+                        // 2. Extra Tags Check (HEVC, 10Bit, x264, HQ) -> Exact wahi uthayega jo select kiya hai
+                        const tags = ['hevc', '10bit', 'hq', 'x264', 'x265', 'hdr'];
+                        for (let tag of tags) {
+                            let targetHasTag = targetQualityText.includes(tag);
+                            let linkHasTag = text.includes(tag);
+                            if (targetHasTag !== linkHasTag) return; // Mismatch hote hi Reject!
+                        }
                     }
-
-                    // 🚨 BALANCED FILTER: Sirf tabhi reject karega jab resolution clearly alag ho 
-                    // (e.g. Manga 1080p tha, par link 720p ka nikla). 
-                    // Agar resolution nahi likha hai, toh pass hone dega!
-                    if (targetRes) {
-                        let linkResMatch = getBaseRes(aQualityText);
-                        if (linkResMatch && linkResMatch !== targetRes) return; 
-                    }
+                    // Agar resolution NAHI likha hai (e.g. "Download FSL Server"), toh usko aane dega!
 
                     if (/^https:\/\/vifix\.site\/hubcloud\/([a-z0-9]+)$/i.test(href)) {
                         href = `https://hubcloud.one/drive/${href.split("/").pop()}`;
                     }
                     
-                    // Saare valid intermediate links ko capture karna (M4uLinks add kiya)
                     const isValidHop = href.includes('hubcloud') || href.includes('gdflix') || 
                                        href.includes('gamerxyt') || href.includes('m4ulinks');
                                        
                     if (isValidHop) {
-                        urls.push({ genUrl: href, episode: currentEpisode, quality: currentQualityText });
+                        // episode aur quality directly user ke selection se aayegi, overwrite nahi hogi!
+                        urls.push({ genUrl: href, episode: linkObj.episode, quality: linkObj.quality });
                     }
                 });
                 return urls;
@@ -243,7 +236,6 @@ app.post('/api/extract', async (req, res) => {
                 
                 $('a.btn, a').each((i, a) => {
                     const href = $(a).attr('href');
-                    // FastDL aur Gamerxyt dono capture honge
                     if (href && (href.includes('gamerxyt.com') || href.includes('hubcloud.php') || href.includes('fastdl'))) {
                         genUrls.push({ url: href, episode: item.episode, quality: item.quality });
                     }
@@ -337,7 +329,7 @@ app.post('/api/extract', async (req, res) => {
 
         rawFinalLinks = await Promise.all(doubleBypassPromises);
 
-        // 🔥 DEDUPLICATION FIX: Ek jaise 2 link ko hatane ka system (Sirf unique server bachenge)
+        // 🔥 Ek jaise duplicate servers hatane ke liye
         rawFinalLinks.forEach(f => {
             let isDuplicate = finalLinks.some(exist => 
                 exist.url === f.url || 
@@ -354,5 +346,6 @@ app.post('/api/extract', async (req, res) => {
 
     res.json({ finalLinks });
 });
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Server running at port ${PORT}`));
