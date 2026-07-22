@@ -102,7 +102,6 @@ app.get('/api/search', async (req, res) => {
             const text = $$(el).text().replace(/\s+/g, ' ').trim();
 
             if (tagName !== 'a') {
-                // 🔥 FIXED: Ab exact pura naam pakdega, chahe wo Movie ho ya Web Series (Season/Episode)
                 if (/(480p|720p|1080p|2160p|4k|Season|Episode|Pack|Complete)/i.test(text) && text.length > 3 && text.length < 150) {
                     if (!text.toLowerCase().includes('you may also like') && !text.toLowerCase().includes('related')) {
                         currentQuality = text.replace(/(Download|Links|Here|Now|-)/gi, '').trim();
@@ -133,7 +132,6 @@ app.get('/api/search', async (req, res) => {
                     text.toLowerCase().includes('telegram group');
 
                 if (isDownloadLink && !isTelegram) {
-                    // 🔥 FIXED: Web series ke Episodes perfectly nikalenge ab
                     let epMatch = text.match(/(E\d+|Ep\s*\d+|Episode\s*\d+|Pack|Season\s*\d+)/i);
                     let episode = epMatch ? epMatch[0].toUpperCase() : 'Movie';
 
@@ -143,7 +141,7 @@ app.get('/api/search', async (req, res) => {
                     }
 
                     downloadLinks.push({ 
-                        quality: currentQuality, // Exact bada wala naam (e.g., "720p HEVC [750MB]")
+                        quality: currentQuality, 
                         episode: episode, 
                         url: resolveUrl(movieUrl, href) 
                     });
@@ -157,7 +155,7 @@ app.get('/api/search', async (req, res) => {
     }
 });
 
-// Final Extraction Logic (NO EXTRA CONFUSION, STRICT BYPASS ONLY)
+// 🔥 THE MASTERMIND EXTRACTION LOGIC (Based on your exact Size Matching Idea) 🔥
 app.post('/api/extract', async (req, res) => {
     const { links } = req.body;
     let finalLinks = [];
@@ -171,55 +169,85 @@ app.post('/api/extract', async (req, res) => {
                     urlToFetch = `https://hubcloud.one/drive/${urlToFetch.split("/").pop()}`;
                 }
 
-                // 🔥 User ne jo Exact naam aur Episode select kiya hai, usko lock kar liya.
-                // Ab hum isko change nahi karenge.
-                const lockedQuality = linkObj.quality; 
-                const lockedEpisode = linkObj.episode;
+                const lockedQuality = linkObj.quality || ""; 
+                const lockedEpisode = linkObj.episode || "Movie";
+
+                // Step 1: Naam mein se SIZE nikalo (e.g., [6.2GB] -> "6.2")
+                let sizeMatch = lockedQuality.match(/(\d+(?:\.\d+)?)\s*(GB|MB)/i);
+                let targetSizeNum = sizeMatch ? sizeMatch[1] : null; 
+                
+                // Fallback: Agar size nahi hai toh Resolution aur Tags nikalo
+                let resMatch = lockedQuality.match(/(480p|720p|1080p|2160p|4k)/i);
+                let targetRes = resMatch ? resMatch[0].toLowerCase() : null;
+                if (targetRes === '4k') targetRes = '2160p';
+                let targetTags = ['hevc', '10bit', 'hq', 'x264', 'x265', 'hdr'].filter(t => lockedQuality.toLowerCase().includes(t));
+
+                // Agar direct hubcloud link mila hai pehle se
+                if (urlToFetch.includes('hubcloud') || urlToFetch.includes('gdflix')) {
+                    return [{ genUrl: urlToFetch, episode: lockedEpisode, quality: lockedQuality }];
+                }
 
                 const linkRes = await axios.get(urlToFetch, { headers: HEADERS, timeout: 12000 });
                 const $ = cheerio.load(linkRes.data);
                 let urls = [];
 
+                // Step 2: 2nd Page (m4ulinks) par jaakar Size ya Name Match karo
                 $('a').each((i, el) => {
                     let href = $(el).attr('href');
                     if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
 
-                    let text = $(el).text().replace(/\s+/g, ' ').trim().toLowerCase();
+                    const isValidHop = href.includes('hubcloud') || href.includes('gdflix') || href.includes('gamerxyt') || href.includes('m4ulinks');
                     
-                    // 🔥 BOHOT SIMPLE FILTER 🔥
-                    // Agar HubCloud Folder nikla aur usme multiple resolutions hain, toh sirf wahi 
-                    // uthayenge jiska resolution user ke lockedQuality se match karta ho.
-                    let linkHasRes = /(480p|720p|1080p|2160p|4k)/i.test(text);
-                    if (linkHasRes) {
-                        let linkBaseRes = text.match(/(480p|720p|1080p|2160p|4k)/i)[0];
-                        if (linkBaseRes === '4k') linkBaseRes = '2160p';
-                        
-                        let targetBaseResMatch = lockedQuality.match(/(480p|720p|1080p|2160p|4k)/i);
-                        let targetBaseRes = targetBaseResMatch ? targetBaseResMatch[0].toLowerCase() : null;
-                        if (targetBaseRes === '4k') targetBaseRes = '2160p';
-
-                        // Agar folder mein 720p ki file hai par user ne 1080p manga hai, toh reject.
-                        if (targetBaseRes && linkBaseRes !== targetBaseRes) return;
-                    }
-
-                    if (/^https:\/\/vifix\.site\/hubcloud\/([a-z0-9]+)$/i.test(href)) {
-                        href = `https://hubcloud.one/drive/${href.split("/").pop()}`;
-                    }
-                    
-                    const isValidHop = href.includes('hubcloud') || href.includes('gdflix') || 
-                                       href.includes('gamerxyt') || href.includes('m4ulinks');
-                                       
                     if (isValidHop) {
-                        // Bypass link ke sath user ka EXACT Locked Quality aur Episode bhej rahe hain.
-                        urls.push({ genUrl: href, episode: lockedEpisode, quality: lockedQuality });
+                        // Button ke aas-paas ka text pakdo (wahan size likha hota hai)
+                        let blockText = $(el).parent().parent().text().toLowerCase() + " " + $(el).parent().parent().parent().text().toLowerCase();
+                        
+                        let isMatch = false;
+
+                        if (targetSizeNum) {
+                            // Agar size mil gaya (e.g., "6.2"), toh wo apna link hai!
+                            if (blockText.includes(targetSizeNum)) isMatch = true;
+                        } else if (targetRes) {
+                            // Size na ho toh Res+Tags check karo (e.g., "720p" + "HEVC")
+                            if (blockText.includes(targetRes)) {
+                                let hasAllTags = targetTags.every(t => blockText.includes(t));
+                                if (hasAllTags) isMatch = true;
+                            }
+                        } else {
+                            isMatch = true;
+                        }
+
+                        if (isMatch) {
+                            if (/^https:\/\/vifix\.site\/hubcloud\/([a-z0-9]+)$/i.test(href)) {
+                                href = `https://hubcloud.one/drive/${href.split("/").pop()}`;
+                            }
+                            urls.push({ genUrl: href, episode: lockedEpisode, quality: lockedQuality });
+                        }
                     }
                 });
-                return urls;
+
+                // Safety: Agar kisi wajah se block text read nahi hua, toh backup ke liye sab link bhej do
+                if (urls.length === 0) {
+                    $('a').each((i, el) => {
+                        let href = $(el).attr('href');
+                        if (!href) return;
+                        if (href.includes('hubcloud') || href.includes('gdflix') || href.includes('gamerxyt') || href.includes('m4ulinks')) {
+                            if (/^https:\/\/vifix\.site\/hubcloud\/([a-z0-9]+)$/i.test(href)) {
+                                href = `https://hubcloud.one/drive/${href.split("/").pop()}`;
+                            }
+                            urls.push({ genUrl: href, episode: lockedEpisode, quality: lockedQuality });
+                        }
+                    });
+                }
+
+                // Remove duplicate links agar ek hi box mein do button the
+                return urls.filter((v, i, a) => a.findIndex(t => (t.genUrl === v.genUrl)) === i);
             } catch (e) { return []; }
         });
         
         const allInterUrls = (await Promise.all(interPromises)).flat();
 
+        // Step 3: HubCloud (Yaad rakho, ab yahan hum kuch nahi check kar rahe, seedha Bypass)
         const hubPromises = allInterUrls.map(async (item) => {
             try {
                 const hubRes = await axios.get(item.genUrl, { headers: HEADERS, timeout: 10000 });
@@ -245,6 +273,7 @@ app.post('/api/extract', async (req, res) => {
             if(!seenGen.has(item.url)){ seenGen.add(item.url); uniqueGenUrls.push(item); }
         });
 
+        // Step 4: Final Server Links (10Gbps, Direct File etc.)
         const genPromises = uniqueGenUrls.map(async (item) => {
             if (seenGenerators.has(item.url)) return [];
             seenGenerators.add(item.url);
@@ -286,7 +315,7 @@ app.post('/api/extract', async (req, res) => {
                             }
                         }
 
-                        // Yahan final output ban raha hai, item.quality mein exact wahi naam hai jo aapne select kiya tha.
+                        // Exact wahi original naam (item.quality) yahan pass hoga bina koi chhed-chhad kiye!
                         extracted.push({ server: exactName, url: href, episode: item.episode, quality: item.quality });
                     }
                 });
@@ -311,7 +340,6 @@ app.post('/api/extract', async (req, res) => {
 
         rawFinalLinks = await Promise.all(doubleBypassPromises);
 
-        // 🔥 Duplicate Link Hatao (Extra kachra saaf karo)
         rawFinalLinks.forEach(f => {
             let isDuplicate = finalLinks.some(exist => exist.url === f.url);
             if (!isDuplicate) finalLinks.push(f);
@@ -322,5 +350,6 @@ app.post('/api/extract', async (req, res) => {
 
     res.json({ finalLinks });
 });
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Server running at port ${PORT}`));
