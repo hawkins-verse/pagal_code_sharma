@@ -64,7 +64,7 @@ app.get('/api/suggest', async (req, res) => {
     } catch (e) { res.json([]); }
 });
 
-// 🔥 100x DEEP SCAN SEARCH LOGIC (STRICT BOTTOM-UP BUTTON MATCHER) 🔥
+// 🌟 100x DEEP SCAN SEARCH LOGIC (FIXED FOR BOTH MOVIES & WEB SERIES) 🌟
 app.get('/api/search', async (req, res) => {
     const movieName = req.query.q;
     const movieUrlParam = req.query.url;
@@ -93,69 +93,106 @@ app.get('/api/search', async (req, res) => {
         let qualities = new Set();
         let downloadLinks = [];
 
-        // Ab hum sidha 'a' tags (Links) par focus karenge
-        $$('a').each((i, el) => {
-            const href = $$(el).attr('href');
-            if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
+        // Check karo ki yeh Movie hai ya Web Series (URL ya Title mein Season/Show ho)
+        const isWebSeriesPage = /season|episode|tv show|series/i.test(titleText) || $$('body').text().toLowerCase().includes('season');
 
-            const hrefLower = href.toLowerCase();
-            const className = ($$(el).attr('class') || '').toLowerCase();
-            const lowerText = $$(el).text().toLowerCase().trim();
-            
-            const isDownloadLink = 
-                hrefLower.includes('hubcloud') || hrefLower.includes('m4ulinks') || 
-                hrefLower.includes('vifix') || hrefLower.includes('gdflix') || hrefLower.includes('fastdl') ||
-                className.includes('btn') || className.includes('button') || 
-                lowerText.includes('download links');
+        if (isWebSeriesPage) {
+            // 🔥 WEB SERIES SCANNER (Purana wala trusted logic taaki episodes miss na ho)
+            let currentQuality = "Default Quality";
+            $$('h2, h3, h4, h5, h6, p, div, span, strong, b, a').each((i, el) => {
+                const tagName = el.tagName.toLowerCase();
+                const text = $$(el).text().replace(/\s+/g, ' ').trim();
+                const lowerText = text.toLowerCase();
 
-            const isTelegram = hrefLower.includes('telegram') || hrefLower.includes('t.me') || hrefLower.includes('/tg/') || lowerText.includes('telegram');
-            const isWatchOnline = lowerText.includes('watch') || hrefLower.includes('watch');
+                if (lowerText.includes('you may also like') || lowerText.includes('related')) return;
 
-            // Agar proper Download Button hai...
-            if (isDownloadLink && !isTelegram && !isWatchOnline) {
-                let qualityName = "";
-                let prevElement = $$(el).parent().prev(); // Button ke direct upar wali line pe jao
+                if (tagName !== 'a') {
+                    if (/(480p|720p|1080p|2160p|4k|Season|Episode|Pack)/i.test(text) && text.length > 3 && text.length < 120) {
+                        currentQuality = text.replace(/(Download|Links|Here|Now|-)/gi, '').trim();
+                        qualities.add(currentQuality);
+                    }
+                }
 
-                // Button ke upar maximum 4 lines tak dekhenge (taa ki kachra na aaye)
-                for (let k = 0; k < 4; k++) {
-                    if (!prevElement.length) break;
-                    
-                    let txt = prevElement.text().replace(/\s+/g, ' ').trim();
-                    let lTxt = txt.toLowerCase();
+                if (tagName === 'a') {
+                    const href = $$(el).attr('href');
+                    if (!href || href.startsWith('#') || href.includes('tag=')) return;
 
-                    // Agar upar wali line mein resolution ya episode likha hai
-                    if (/(480p|720p|1080p|2160p|4k|season|episode|pack)/i.test(txt) && txt.length > 5 && txt.length < 150) {
-                        // Paragraph (Download in 480p...) aur Main Title ko exclude karna
-                        if (!lTxt.includes('download in') && !lTxt.includes('optimized file sizes')) {
-                            let resCount = (lTxt.match(/480p|720p|1080p|2160p|4k/g) || []).length;
-                            if (resCount < 3) {
-                                // Exact box ka naam mil gaya!
-                                qualityName = txt.replace(/Download Links?|Here|Now/gi, '').replace(/^[-:]+|[-:]+$/g, '').trim();
-                                break;
+                    const hrefLower = href.toLowerCase();
+                    const isDownloadLink = hrefLower.includes('hubcloud') || hrefLower.includes('m4ulinks') || hrefLower.includes('vifix') || hrefLower.includes('gdflix') || hrefLower.includes('fastdl');
+                    const isTelegram = hrefLower.includes('telegram') || hrefLower.includes('t.me');
+
+                    if (isDownloadLink && !isTelegram) {
+                        let epMatch = text.match(/(E\d+|Ep\s*\d+|Episode\s*\d+|Pack|Season\s*\d+)/i);
+                        let episode = epMatch ? epMatch[0].toUpperCase() : 'Movie';
+
+                        if (currentQuality === "Default Quality") {
+                            currentQuality = titleText;
+                            qualities.add(currentQuality);
+                        }
+
+                        downloadLinks.push({ 
+                            quality: currentQuality, 
+                            episode: episode, 
+                            url: resolveUrl(movieUrl, href) 
+                        });
+                    }
+                }
+            });
+        } else {
+            // 🔥 MOVIE SCANNER (Button ke upar wala exact clean name)
+            $$('a').each((i, el) => {
+                const href = $$(el).attr('href');
+                if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
+
+                const hrefLower = href.toLowerCase();
+                const className = ($$(el).attr('class') || '').toLowerCase();
+                const lowerText = $$(el).text().toLowerCase().trim();
+                
+                const isDownloadLink = 
+                    hrefLower.includes('hubcloud') || hrefLower.includes('m4ulinks') || 
+                    hrefLower.includes('vifix') || hrefLower.includes('gdflix') || hrefLower.includes('fastdl') ||
+                    className.includes('btn') || className.includes('button') || 
+                    lowerText.includes('download links');
+
+                const isTelegram = hrefLower.includes('telegram') || hrefLower.includes('t.me') || lowerText.includes('telegram');
+                const isWatchOnline = lowerText.includes('watch') || hrefLower.includes('watch');
+
+                if (isDownloadLink && !isTelegram && !isWatchOnline) {
+                    let qualityName = "";
+                    let prevElement = $$(el).parent().prev();
+
+                    for (let k = 0; k < 4; k++) {
+                        if (!prevElement.length) break;
+                        let txt = prevElement.text().replace(/\s+/g, ' ').trim();
+                        let lTxt = txt.toLowerCase();
+
+                        if (/(480p|720p|1080p|2160p|4k)/i.test(txt) && txt.length > 5 && txt.length < 150) {
+                            if (!lTxt.includes('download in') && !lTxt.includes('optimized file sizes')) {
+                                let resCount = (lTxt.match(/480p|720p|1080p|2160p|4k/g) || []).length;
+                                if (resCount < 3) {
+                                    qualityName = txt.replace(/Download Links?|Here|Now/gi, '').replace(/^[-:]+|[-:]+$/g, '').trim();
+                                    break;
+                                }
                             }
                         }
+                        prevElement = prevElement.prev();
                     }
-                    prevElement = prevElement.prev(); // Agar is line mein nahi mila toh ek aur line upar jao
+
+                    if (!qualityName) {
+                        qualityName = titleText.split(/480p|720p|1080p|2160p|4k/i)[0].trim();
+                        if (qualityName.endsWith('|') || qualityName.endsWith('-')) qualityName = qualityName.slice(0, -1).trim();
+                    }
+
+                    qualities.add(qualityName);
+
+                    downloadLinks.push({ 
+                        quality: qualityName, 
+                        episode: 'Movie', 
+                        url: resolveUrl(movieUrl, href) 
+                    });
                 }
-
-                // Agar fir bhi koi fallback aata hai (bahut rare case)
-                if (!qualityName) {
-                    qualityName = titleText.split(/480p|720p|1080p|2160p|4k/i)[0].trim();
-                    if (qualityName.endsWith('|') || qualityName.endsWith('-')) qualityName = qualityName.slice(0, -1).trim();
-                }
-
-                let epMatch = qualityName.match(/(E\d+|Ep\s*\d+|Episode\s*\d+|Pack|Season\s*\d+)/i);
-                let episode = epMatch ? epMatch[0].toUpperCase() : 'Movie';
-
-                qualities.add(qualityName);
-
-                downloadLinks.push({ 
-                    quality: qualityName, 
-                    episode: episode, 
-                    url: resolveUrl(movieUrl, href) 
-                });
-            }
-        });
+            });
+        }
 
         res.json({ title: titleText, qualities: Array.from(qualities), links: downloadLinks });
     } catch (e) {
