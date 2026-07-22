@@ -155,7 +155,7 @@ app.get('/api/search', async (req, res) => {
     }
 });
 
-// 🔥 THE MASTERMIND EXTRACTION LOGIC (100% Fixed HTML Sibling Reading) 🔥
+// 🔥 THE MASTERMIND EXTRACTION LOGIC (100% Fixed Header & Typo Matcher) 🔥
 app.post('/api/extract', async (req, res) => {
     const { links } = req.body;
     let finalLinks = [];
@@ -172,13 +172,14 @@ app.post('/api/extract', async (req, res) => {
                 const lockedQuality = linkObj.quality || ""; 
                 const lockedEpisode = linkObj.episode || "Movie";
 
-                // Step 1: Size aur Resolution nikalo
+                // Step 1: Target Size, Resolution aur Tags nikalo
                 let sizeMatch = lockedQuality.match(/(\d+(?:\.\d+)?)\s*(GB|MB)/i);
                 let targetSizeNum = sizeMatch ? sizeMatch[1] : null; 
                 
                 let resMatch = lockedQuality.match(/(480p|720p|1080p|2160p|4k)/i);
                 let targetRes = resMatch ? resMatch[0].toLowerCase() : null;
                 if (targetRes === '4k') targetRes = '2160p';
+                
                 let targetTags = ['hevc', '10bit', 'hq', 'x264', 'x265', 'hdr'].filter(t => lockedQuality.toLowerCase().includes(t));
 
                 if (urlToFetch.includes('hubcloud') || urlToFetch.includes('gdflix')) {
@@ -187,9 +188,10 @@ app.post('/api/extract', async (req, res) => {
 
                 const linkRes = await axios.get(urlToFetch, { headers: HEADERS, timeout: 12000 });
                 const $ = cheerio.load(linkRes.data);
-                let urls = [];
+                
+                let urlObjs = [];
 
-                // Step 2: M4ulinks par Link ke theek upar wala text padho
+                // Step 2: Har link ki original Heading (Resolution/Size) nikalo
                 $('a').each((i, el) => {
                     let href = $(el).attr('href');
                     if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
@@ -197,69 +199,65 @@ app.post('/api/extract', async (req, res) => {
                     const isValidHop = href.includes('hubcloud') || href.includes('gdflix') || href.includes('gamerxyt') || href.includes('m4ulinks');
                     
                     if (isValidHop) {
-                        // 🔥 PADOSI SCANNER: Button ke upar ki 3 lines padho
-                        let parentNode = $(el).parent();
-                        let blockText = parentNode.text().toLowerCase() + " ";
+                        let headerText = "";
+                        let curr = $(el).parent();
                         
-                        let prevNode = parentNode.prev();
-                        for(let k = 0; k < 3; k++) {
-                            if(prevNode.length) {
-                                blockText += prevNode.text().toLowerCase() + " ";
-                                prevNode = prevNode.prev();
+                        // Upar ki 5 lines mein closest Quality Heading dhoondho
+                        for (let k = 0; k < 5; k++) {
+                            if (!curr.length || curr.prop('tagName') === 'HR') break;
+                            let txt = curr.text().toLowerCase();
+                            if (/(480p|720p|1080p|2160p|4k)/i.test(txt)) {
+                                headerText = txt;
+                                break;
                             }
+                            curr = curr.prev();
                         }
-                        blockText += $(el).text().toLowerCase();
-
-                        let isMatch = false;
-
-                        if (targetSizeNum) {
-                            if (blockText.includes(targetSizeNum)) isMatch = true;
-                        } else if (targetRes) {
-                            if (blockText.includes(targetRes)) {
-                                let hasAllTags = targetTags.every(t => blockText.includes(t));
-                                if (hasAllTags) isMatch = true;
-                            }
-                        } else {
-                            isMatch = true;
-                        }
-
-                        if (isMatch) {
-                            if (/^https:\/\/vifix\.site\/hubcloud\/([a-z0-9]+)$/i.test(href)) {
-                                href = `https://hubcloud.one/drive/${href.split("/").pop()}`;
-                            }
-                            urls.push({ genUrl: href, episode: lockedEpisode, quality: lockedQuality });
-                        }
+                        
+                        if (!headerText) headerText = $(el).text().toLowerCase() + " " + $(el).parent().text().toLowerCase();
+                        urlObjs.push({ href, headerText });
                     }
                 });
 
-                // Safety Fallback: Agar kisi wajah se Size se match na ho paaye, toh Resolution (e.g. 1080p) se check kar lo
-                if (urls.length === 0 && targetRes) {
-                    $('a').each((i, el) => {
-                        let href = $(el).attr('href');
-                        if (!href) return;
-                        if (href.includes('hubcloud') || href.includes('gdflix') || href.includes('gamerxyt') || href.includes('m4ulinks')) {
-                            
-                            let parentNode = $(el).parent();
-                            let blockText = parentNode.text().toLowerCase() + " ";
-                            let prevNode = parentNode.prev();
-                            for(let k = 0; k < 3; k++) {
-                                if(prevNode.length) {
-                                    blockText += prevNode.text().toLowerCase() + " ";
-                                    prevNode = prevNode.prev();
-                                }
-                            }
-                            
-                            if (blockText.includes(targetRes)) {
-                                if (/^https:\/\/vifix\.site\/hubcloud\/([a-z0-9]+)$/i.test(href)) {
-                                    href = `https://hubcloud.one/drive/${href.split("/").pop()}`;
-                                }
-                                urls.push({ genUrl: href, episode: lockedEpisode, quality: lockedQuality });
-                            }
-                        }
+                let matchedUrls = [];
+
+                // Attempt 1: Size se direct match (agar size exactly match ho jaye, jaise 6.2GB)
+                if (targetSizeNum) {
+                    matchedUrls = urlObjs.filter(obj => obj.headerText.includes(targetSizeNum));
+                }
+
+                // Attempt 2: Agar size galat likha hai (Jaise 300MB vs 350MB), toh Resolution + Tags match karo
+                if (matchedUrls.length === 0 && targetRes) {
+                    matchedUrls = urlObjs.filter(obj => {
+                        let hResMatch = obj.headerText.match(/(480p|720p|1080p|2160p|4k)/i);
+                        let hRes = hResMatch ? hResMatch[0].toLowerCase() : null;
+                        if (hRes === '4k') hRes = '2160p';
+                        
+                        let hasRes = (hRes === targetRes);
+                        let hasAllTags = targetTags.every(t => obj.headerText.includes(t));
+                        return hasRes && hasAllTags;
                     });
                 }
 
-                // Remove exact duplicates
+                // Attempt 3: Agar admin ne tags bhi nahi likhe, toh strict Resolution match karo (Par 720p mein 480p mix nahi hoga!)
+                if (matchedUrls.length === 0 && targetRes) {
+                    matchedUrls = urlObjs.filter(obj => {
+                        let hResMatch = obj.headerText.match(/(480p|720p|1080p|2160p|4k)/i);
+                        let hRes = hResMatch ? hResMatch[0].toLowerCase() : null;
+                        if (hRes === '4k') hRes = '2160p';
+                        return hRes === targetRes;
+                    });
+                }
+
+                let urls = [];
+                matchedUrls.forEach(obj => {
+                    let href = obj.href;
+                    if (/^https:\/\/vifix\.site\/hubcloud\/([a-z0-9]+)$/i.test(href)) {
+                        href = `https://hubcloud.one/drive/${href.split("/").pop()}`;
+                    }
+                    urls.push({ genUrl: href, episode: lockedEpisode, quality: lockedQuality });
+                });
+
+                // Remove exact duplicate links at this stage
                 return urls.filter((v, i, a) => a.findIndex(t => (t.genUrl === v.genUrl)) === i);
             } catch (e) { return []; }
         });
@@ -334,6 +332,7 @@ app.post('/api/extract', async (req, res) => {
                             }
                         }
 
+                        // Exact wahi original naam (item.quality) yahan pass hoga
                         extracted.push({ server: exactName, url: href, episode: item.episode, quality: item.quality });
                     }
                 });
