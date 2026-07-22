@@ -157,6 +157,7 @@ app.get('/api/search', async (req, res) => {
     }
 });
 
+// Final Extraction Logic (NO EXTRA CONFUSION, STRICT BYPASS ONLY)
 app.post('/api/extract', async (req, res) => {
     const { links } = req.body;
     let finalLinks = [];
@@ -170,7 +171,10 @@ app.post('/api/extract', async (req, res) => {
                     urlToFetch = `https://hubcloud.one/drive/${urlToFetch.split("/").pop()}`;
                 }
 
-                const targetQualityText = (linkObj.quality || "").toLowerCase();
+                // 🔥 User ne jo Exact naam aur Episode select kiya hai, usko lock kar liya.
+                // Ab hum isko change nahi karenge.
+                const lockedQuality = linkObj.quality; 
+                const lockedEpisode = linkObj.episode;
 
                 const linkRes = await axios.get(urlToFetch, { headers: HEADERS, timeout: 12000 });
                 const $ = cheerio.load(linkRes.data);
@@ -182,30 +186,21 @@ app.post('/api/extract', async (req, res) => {
 
                     let text = $(el).text().replace(/\s+/g, ' ').trim().toLowerCase();
                     
-                    // 🔥 SMART MATCHING LOGIC 🔥
-                    // Agar anchor tag par resolution likha hai (मतलब HubCloud ka Folder hai)
+                    // 🔥 BOHOT SIMPLE FILTER 🔥
+                    // Agar HubCloud Folder nikla aur usme multiple resolutions hain, toh sirf wahi 
+                    // uthayenge jiska resolution user ke lockedQuality se match karta ho.
                     let linkHasRes = /(480p|720p|1080p|2160p|4k)/i.test(text);
-                    
                     if (linkHasRes) {
-                        let linkResMatch = text.match(/(480p|720p|1080p|2160p|4k)/i)[0];
-                        if (linkResMatch === '4k') linkResMatch = '2160p';
+                        let linkBaseRes = text.match(/(480p|720p|1080p|2160p|4k)/i)[0];
+                        if (linkBaseRes === '4k') linkBaseRes = '2160p';
                         
-                        let targetResMatch = targetQualityText.match(/(480p|720p|1080p|2160p|4k)/i);
-                        let targetRes = targetResMatch ? targetResMatch[0] : null;
-                        if (targetRes === '4k') targetRes = '2160p';
-                        
-                        // 1. Resolution Check
-                        if (targetRes && linkResMatch !== targetRes) return; 
-                        
-                        // 2. Extra Tags Check (HEVC, 10Bit, x264, HQ) -> Exact wahi uthayega jo select kiya hai
-                        const tags = ['hevc', '10bit', 'hq', 'x264', 'x265', 'hdr'];
-                        for (let tag of tags) {
-                            let targetHasTag = targetQualityText.includes(tag);
-                            let linkHasTag = text.includes(tag);
-                            if (targetHasTag !== linkHasTag) return; // Mismatch hote hi Reject!
-                        }
+                        let targetBaseResMatch = lockedQuality.match(/(480p|720p|1080p|2160p|4k)/i);
+                        let targetBaseRes = targetBaseResMatch ? targetBaseResMatch[0].toLowerCase() : null;
+                        if (targetBaseRes === '4k') targetBaseRes = '2160p';
+
+                        // Agar folder mein 720p ki file hai par user ne 1080p manga hai, toh reject.
+                        if (targetBaseRes && linkBaseRes !== targetBaseRes) return;
                     }
-                    // Agar resolution NAHI likha hai (e.g. "Download FSL Server"), toh usko aane dega!
 
                     if (/^https:\/\/vifix\.site\/hubcloud\/([a-z0-9]+)$/i.test(href)) {
                         href = `https://hubcloud.one/drive/${href.split("/").pop()}`;
@@ -215,8 +210,8 @@ app.post('/api/extract', async (req, res) => {
                                        href.includes('gamerxyt') || href.includes('m4ulinks');
                                        
                     if (isValidHop) {
-                        // episode aur quality directly user ke selection se aayegi, overwrite nahi hogi!
-                        urls.push({ genUrl: href, episode: linkObj.episode, quality: linkObj.quality });
+                        // Bypass link ke sath user ka EXACT Locked Quality aur Episode bhej rahe hain.
+                        urls.push({ genUrl: href, episode: lockedEpisode, quality: lockedQuality });
                     }
                 });
                 return urls;
@@ -255,12 +250,7 @@ app.post('/api/extract', async (req, res) => {
             seenGenerators.add(item.url);
 
             try {
-                const genRes = await axios.get(item.url, {
-                    headers: HEADERS,
-                    timeout: 15000,
-                    maxRedirects: 5
-                });
-
+                const genRes = await axios.get(item.url, { headers: HEADERS, timeout: 15000 });
                 const pixelScriptMatch = genRes.data.match(/var\s+pxl\s*=\s*["']([^"']+)["']/);
                 const jsPixelUrl = pixelScriptMatch ? pixelScriptMatch[1] : null;
 
@@ -272,25 +262,16 @@ app.post('/api/extract', async (req, res) => {
                     let text = $(a).text().trim() || "Download";
                     if (!href || !href.startsWith('http')) return;
 
-                    const lowerText = text.toLowerCase();
                     const lowerHref = href.toLowerCase();
-
-                    const blacklist = [
-                        't.me', 'telegram', '/tg/', 'telegram.me', 'joinchat', 'whatsapp', 'discord'
-                    ];
-
-                    if (blacklist.some(term => lowerText.includes(term) || lowerHref.includes(term))) {
-                        return;
-                    }
+                    const blacklist = ['t.me', 'telegram', '/tg/', 'whatsapp', 'discord'];
+                    if (blacklist.some(term => lowerHref.includes(term))) return;
 
                     const isDirectFile = /\.(zip|rar|7z|mkv|mp4|avi|mov|pdf|doc|docx)$/i.test(href);
                     const isCloudflare = lowerHref.includes("r2.dev") || lowerHref.includes("cloudflare") || lowerHref.includes("workers.dev");
                     const isDrive = lowerHref.includes("googleusercontent.com") || lowerHref.includes("drive.google.com");
                     const isExternal = lowerHref.includes("mediafire") || lowerHref.includes("mega.nz") || lowerHref.includes("dropbox");
                     const isPixel = lowerHref.includes("pixeldrain");
-                    
-                    const legacyIndicators = ['10gbps', 'zipdisk', 'ddl', 'fsl', 'fslv2', 'fsl 2', 'server', 'buzz'];
-                    const hasLegacy = legacyIndicators.some(ind => lowerText.includes(ind) || lowerHref.includes(ind));
+                    const hasLegacy = ['10gbps', 'zipdisk', 'ddl', 'fsl', 'server', 'buzz'].some(ind => lowerHref.includes(ind) || text.toLowerCase().includes(ind));
                     
                     if (isDirectFile || isCloudflare || isDrive || isExternal || isPixel || hasLegacy) {
                         let exactName = text.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -305,6 +286,7 @@ app.post('/api/extract', async (req, res) => {
                             }
                         }
 
+                        // Yahan final output ban raha hai, item.quality mein exact wahi naam hai jo aapne select kiya tha.
                         extracted.push({ server: exactName, url: href, episode: item.episode, quality: item.quality });
                     }
                 });
@@ -329,16 +311,10 @@ app.post('/api/extract', async (req, res) => {
 
         rawFinalLinks = await Promise.all(doubleBypassPromises);
 
-        // 🔥 Ek jaise duplicate servers hatane ke liye
+        // 🔥 Duplicate Link Hatao (Extra kachra saaf karo)
         rawFinalLinks.forEach(f => {
-            let isDuplicate = finalLinks.some(exist => 
-                exist.url === f.url || 
-                (exist.server === f.server && exist.episode === f.episode) 
-            );
-
-            if (!isDuplicate) {
-                finalLinks.push(f);
-            }
+            let isDuplicate = finalLinks.some(exist => exist.url === f.url);
+            if (!isDuplicate) finalLinks.push(f);
         });
 
         finalLinks.sort((a, b) => a.episode.localeCompare(b.episode));
@@ -346,6 +322,5 @@ app.post('/api/extract', async (req, res) => {
 
     res.json({ finalLinks });
 });
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Server running at port ${PORT}`));
