@@ -86,11 +86,7 @@ app.get('/api/search', async (req, res) => {
             titleText = firstResult.text().trim();
         }
 
-        const detailsRes = await axios.get(movieUrl, { 
-            headers: HEADERS, 
-            timeout: 10000 
-        });
-
+        const detailsRes = await axios.get(movieUrl, { headers: HEADERS, timeout: 10000 });
         const $$ = cheerio.load(detailsRes.data);
         
         let qualities = new Set();
@@ -124,12 +120,9 @@ app.get('/api/search', async (req, res) => {
                     text.toLowerCase().includes('download links');
 
                 const isTelegram =
-                    hrefLower.includes('telegram') ||
-                    hrefLower.includes('t.me') ||
-                    hrefLower.includes('/tg/') ||
-                    text.toLowerCase().includes('telegram') ||
-                    text.toLowerCase().includes('download from telegram') ||
-                    text.toLowerCase().includes('telegram group');
+                    hrefLower.includes('telegram') || hrefLower.includes('t.me') ||
+                    hrefLower.includes('/tg/') || text.toLowerCase().includes('telegram') ||
+                    text.toLowerCase().includes('download from telegram');
 
                 if (isDownloadLink && !isTelegram) {
                     let epMatch = text.match(/(E\d+|Ep\s*\d+|Episode\s*\d+|Pack|Season\s*\d+)/i);
@@ -155,7 +148,7 @@ app.get('/api/search', async (req, res) => {
     }
 });
 
-// 🔥 THE MASTERMIND EXTRACTION LOGIC (100% Fixed Header & Typo Matcher) 🔥
+// 🔥 THE MASTERMIND EXTRACTION LOGIC (Now with Auto-Episode Detection!) 🔥
 app.post('/api/extract', async (req, res) => {
     const { links } = req.body;
     let finalLinks = [];
@@ -172,14 +165,12 @@ app.post('/api/extract', async (req, res) => {
                 const lockedQuality = linkObj.quality || ""; 
                 const lockedEpisode = linkObj.episode || "Movie";
 
-                // Step 1: Target Size, Resolution aur Tags nikalo
                 let sizeMatch = lockedQuality.match(/(\d+(?:\.\d+)?)\s*(GB|MB)/i);
                 let targetSizeNum = sizeMatch ? sizeMatch[1] : null; 
                 
                 let resMatch = lockedQuality.match(/(480p|720p|1080p|2160p|4k)/i);
                 let targetRes = resMatch ? resMatch[0].toLowerCase() : null;
                 if (targetRes === '4k') targetRes = '2160p';
-                
                 let targetTags = ['hevc', '10bit', 'hq', 'x264', 'x265', 'hdr'].filter(t => lockedQuality.toLowerCase().includes(t));
 
                 if (urlToFetch.includes('hubcloud') || urlToFetch.includes('gdflix')) {
@@ -191,7 +182,6 @@ app.post('/api/extract', async (req, res) => {
                 
                 let urlObjs = [];
 
-                // Step 2: Har link ki original Heading (Resolution/Size) nikalo
                 $('a').each((i, el) => {
                     let href = $(el).attr('href');
                     if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
@@ -202,11 +192,12 @@ app.post('/api/extract', async (req, res) => {
                         let headerText = "";
                         let curr = $(el).parent();
                         
-                        // Upar ki 5 lines mein closest Quality Heading dhoondho
-                        for (let k = 0; k < 5; k++) {
+                        // Upar ki 6 lines mein closest Heading dhoondho (Resolution ya Episode)
+                        for (let k = 0; k < 6; k++) {
                             if (!curr.length || curr.prop('tagName') === 'HR') break;
                             let txt = curr.text().toLowerCase();
-                            if (/(480p|720p|1080p|2160p|4k)/i.test(txt)) {
+                            // Resolution ya Episode text ko pakadna
+                            if (/(480p|720p|1080p|2160p|4k|episode|ep\s*\d+|e\d+)/i.test(txt)) {
                                 headerText = txt;
                                 break;
                             }
@@ -214,38 +205,50 @@ app.post('/api/extract', async (req, res) => {
                         }
                         
                         if (!headerText) headerText = $(el).text().toLowerCase() + " " + $(el).parent().text().toLowerCase();
-                        urlObjs.push({ href, headerText });
+                        
+                        // 🔥 WEB SERIES EPISODE EXTRACTOR 🔥
+                        let linkEpisode = lockedEpisode;
+                        let epMatch = headerText.match(/(?:episodes?|ep)\s*[:-]*\s*(\d+)/i);
+                        if (epMatch) {
+                            // Format: Episode 01, Episode 02 (taki sorting perfectly ho)
+                            linkEpisode = `Episode ${epMatch[1].padStart(2, '0')}`;
+                        }
+
+                        urlObjs.push({ href, headerText, linkEpisode });
                     }
                 });
 
                 let matchedUrls = [];
 
-                // Attempt 1: Size se direct match (agar size exactly match ho jaye, jaise 6.2GB)
-                if (targetSizeNum) {
-                    matchedUrls = urlObjs.filter(obj => obj.headerText.includes(targetSizeNum));
-                }
+                // 🚨 WEB SERIES DETECTOR: Agar select kiye gaye naam me TV Show/Season ho ya URL page par Episode dikh jaye
+                let isWebSeries = /season|episode|tv show/i.test(lockedQuality) || urlObjs.some(obj => /episode|ep\s*\d+/i.test(obj.headerText));
 
-                // Attempt 2: Agar size galat likha hai (Jaise 300MB vs 350MB), toh Resolution + Tags match karo
-                if (matchedUrls.length === 0 && targetRes) {
-                    matchedUrls = urlObjs.filter(obj => {
-                        let hResMatch = obj.headerText.match(/(480p|720p|1080p|2160p|4k)/i);
-                        let hRes = hResMatch ? hResMatch[0].toLowerCase() : null;
-                        if (hRes === '4k') hRes = '2160p';
-                        
-                        let hasRes = (hRes === targetRes);
-                        let hasAllTags = targetTags.every(t => obj.headerText.includes(t));
-                        return hasRes && hasAllTags;
-                    });
-                }
-
-                // Attempt 3: Agar admin ne tags bhi nahi likhe, toh strict Resolution match karo (Par 720p mein 480p mix nahi hoga!)
-                if (matchedUrls.length === 0 && targetRes) {
-                    matchedUrls = urlObjs.filter(obj => {
-                        let hResMatch = obj.headerText.match(/(480p|720p|1080p|2160p|4k)/i);
-                        let hRes = hResMatch ? hResMatch[0].toLowerCase() : null;
-                        if (hRes === '4k') hRes = '2160p';
-                        return hRes === targetRes;
-                    });
+                if (isWebSeries) {
+                    // Web Series ke page par saare links accept honge kyunki unpe sirf Episode no. hota hai, size nahi!
+                    matchedUrls = urlObjs;
+                } else {
+                    // Movie Filter Logic
+                    if (targetSizeNum) {
+                        matchedUrls = urlObjs.filter(obj => obj.headerText.includes(targetSizeNum));
+                    }
+                    if (matchedUrls.length === 0 && targetRes) {
+                        matchedUrls = urlObjs.filter(obj => {
+                            let hResMatch = obj.headerText.match(/(480p|720p|1080p|2160p|4k)/i);
+                            let hRes = hResMatch ? hResMatch[0].toLowerCase() : null;
+                            if (hRes === '4k') hRes = '2160p';
+                            let hasRes = (hRes === targetRes);
+                            let hasAllTags = targetTags.every(t => obj.headerText.includes(t));
+                            return hasRes && hasAllTags;
+                        });
+                    }
+                    if (matchedUrls.length === 0 && targetRes) {
+                        matchedUrls = urlObjs.filter(obj => {
+                            let hResMatch = obj.headerText.match(/(480p|720p|1080p|2160p|4k)/i);
+                            let hRes = hResMatch ? hResMatch[0].toLowerCase() : null;
+                            if (hRes === '4k') hRes = '2160p';
+                            return hRes === targetRes;
+                        });
+                    }
                 }
 
                 let urls = [];
@@ -254,10 +257,11 @@ app.post('/api/extract', async (req, res) => {
                     if (/^https:\/\/vifix\.site\/hubcloud\/([a-z0-9]+)$/i.test(href)) {
                         href = `https://hubcloud.one/drive/${href.split("/").pop()}`;
                     }
-                    urls.push({ genUrl: href, episode: lockedEpisode, quality: lockedQuality });
+                    // Yahan hum specific Episode assign kar rahe hain
+                    urls.push({ genUrl: href, episode: obj.linkEpisode, quality: lockedQuality });
                 });
 
-                // Remove exact duplicate links at this stage
+                // Remove exact duplicates
                 return urls.filter((v, i, a) => a.findIndex(t => (t.genUrl === v.genUrl)) === i);
             } catch (e) { return []; }
         });
@@ -332,7 +336,6 @@ app.post('/api/extract', async (req, res) => {
                             }
                         }
 
-                        // Exact wahi original naam (item.quality) yahan pass hoga
                         extracted.push({ server: exactName, url: href, episode: item.episode, quality: item.quality });
                     }
                 });
@@ -363,10 +366,12 @@ app.post('/api/extract', async (req, res) => {
             if (!isDuplicate) finalLinks.push(f);
         });
 
+        // 🔥 SORTING BY EPISODE (Episode 01, Episode 02 ekdum line se aayenge)
         finalLinks.sort((a, b) => a.episode.localeCompare(b.episode));
     } catch (e) { console.error("Extraction error:", e.message); }
 
     res.json({ finalLinks });
 });
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Server running at port ${PORT}`));
