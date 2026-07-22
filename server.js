@@ -64,7 +64,7 @@ app.get('/api/suggest', async (req, res) => {
     } catch (e) { res.json([]); }
 });
 
-// 🌟 100x DEEP SCAN SEARCH LOGIC - STRICT BARRIERS REMOVED (WRAPPER BUG FIXED) 🌟
+// 🌟 100x DEEP SCAN SEARCH LOGIC (BUG FIXED: ONLY BUTTON LABELS) 🌟
 app.get('/api/search', async (req, res) => {
     const movieName = req.query.q;
     const movieUrlParam = req.query.url;
@@ -92,8 +92,8 @@ app.get('/api/search', async (req, res) => {
         
         let qualities = new Set();
         let downloadLinks = [];
-        let currentQuality = "Default Quality";
-        let stopParsing = false; // 🔥 STOPPER (Brake) 
+        let currentQuality = null; // Default kachra hata diya
+        let stopParsing = false; 
 
         $$('h2, h3, h4, h5, h6, p, div, span, strong, b, a').each((i, el) => {
             if (stopParsing) return; 
@@ -102,7 +102,7 @@ app.get('/api/search', async (req, res) => {
             const text = $$(el).text().replace(/\s+/g, ' ').trim();
             const lowerText = text.toLowerCase();
 
-            // 🔥 MAIN FIX: "text.length < 80" lagaya taaki bade wrapper <div> par brake na lage!
+            // Stopper (Brake) taaki You May Also Like ka kachra na aaye
             if (text.length > 0 && text.length < 80) {
                 if (lowerText === 'you may also like' || lowerText === 'related' || lowerText.includes('related movies') || lowerText.includes('leave a reply') || lowerText.includes('similar')) {
                     stopParsing = true;
@@ -111,10 +111,12 @@ app.get('/api/search', async (req, res) => {
             }
 
             if (tagName !== 'a') {
-                if (/(480p|720p|1080p|2160p|4k|Season|Episode|Pack|Complete)/i.test(text) && text.length > 3 && text.length < 150) {
-                    if (!lowerText.includes('you may also like') && !lowerText.includes('related')) {
+                // Sirf wahi text padhega jo 120 characters se chota ho (Bade paragraph aur title ko block karne ke liye)
+                if (/(480p|720p|1080p|2160p|4k|Season|Episode|Pack|Complete)/i.test(text) && text.length > 3 && text.length < 120) {
+                    // Paragraph description "Download in 480p, 720p..." ko ignore karega
+                    if (!lowerText.includes('download in 480p') && !lowerText.includes('optimized file sizes')) {
+                        // Naam yaad rakhega, par list mein ABHI nahi dalega!
                         currentQuality = text.replace(/(Download|Links|Here|Now|-)/gi, '').trim();
-                        qualities.add(currentQuality);
                     }
                 }
             }
@@ -141,14 +143,17 @@ app.get('/api/search', async (req, res) => {
                     let epMatch = text.match(/(E\d+|Ep\s*\d+|Episode\s*\d+|Pack|Season\s*\d+)/i);
                     let episode = epMatch ? epMatch[0].toUpperCase() : 'Movie';
 
-                    // "All Available Links" ko hatakar seedha Movie ka Title de dega
-                    if (currentQuality === "Default Quality") {
-                        currentQuality = titleText; 
-                        qualities.add(currentQuality);
+                    // Agar upar koi naam nahi mila, tabhi title use karega
+                    let finalQualityName = currentQuality;
+                    if (!finalQualityName) {
+                        finalQualityName = titleText; 
                     }
 
+                    // 🔥 MAIN FIX: Jab Download Link milega, SIRF tabhi naam ko dropdown list mein add karega!
+                    qualities.add(finalQualityName);
+
                     downloadLinks.push({ 
-                        quality: currentQuality, 
+                        quality: finalQualityName, 
                         episode: episode, 
                         url: resolveUrl(movieUrl, href) 
                     });
@@ -156,10 +161,7 @@ app.get('/api/search', async (req, res) => {
             }
         });
 
-        // Double check: Faltu values filter out kar rahe hain
-        let finalQualities = Array.from(qualities).filter(q => q !== "All Available Links" && q !== "Default Quality");
-
-        res.json({ title: titleText, qualities: finalQualities, links: downloadLinks });
+        res.json({ title: titleText, qualities: Array.from(qualities), links: downloadLinks });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
