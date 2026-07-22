@@ -155,7 +155,7 @@ app.get('/api/search', async (req, res) => {
     }
 });
 
-// 🔥 THE MASTERMIND EXTRACTION LOGIC (Bug Fixed: Strict Container Matching) 🔥
+// 🔥 THE MASTERMIND EXTRACTION LOGIC (100% Fixed HTML Sibling Reading) 🔥
 app.post('/api/extract', async (req, res) => {
     const { links } = req.body;
     let finalLinks = [];
@@ -172,11 +172,10 @@ app.post('/api/extract', async (req, res) => {
                 const lockedQuality = linkObj.quality || ""; 
                 const lockedEpisode = linkObj.episode || "Movie";
 
-                // Step 1: Naam mein se SIZE nikalo (e.g., [6.2GB] -> "6.2")
+                // Step 1: Size aur Resolution nikalo
                 let sizeMatch = lockedQuality.match(/(\d+(?:\.\d+)?)\s*(GB|MB)/i);
                 let targetSizeNum = sizeMatch ? sizeMatch[1] : null; 
                 
-                // Fallback: Agar size nahi hai toh Resolution aur Tags nikalo
                 let resMatch = lockedQuality.match(/(480p|720p|1080p|2160p|4k)/i);
                 let targetRes = resMatch ? resMatch[0].toLowerCase() : null;
                 if (targetRes === '4k') targetRes = '2160p';
@@ -190,7 +189,7 @@ app.post('/api/extract', async (req, res) => {
                 const $ = cheerio.load(linkRes.data);
                 let urls = [];
 
-                // Step 2: 2nd Page (m4ulinks) par jaakar Size ya Name Match karo
+                // Step 2: M4ulinks par Link ke theek upar wala text padho
                 $('a').each((i, el) => {
                     let href = $(el).attr('href');
                     if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
@@ -198,33 +197,30 @@ app.post('/api/extract', async (req, res) => {
                     const isValidHop = href.includes('hubcloud') || href.includes('gdflix') || href.includes('gamerxyt') || href.includes('m4ulinks');
                     
                     if (isValidHop) {
-                        let isMatch = false;
+                        // 🔥 PADOSI SCANNER: Button ke upar ki 3 lines padho
+                        let parentNode = $(el).parent();
+                        let blockText = parentNode.text().toLowerCase() + " ";
                         
-                        // 🔥 MAIN FIX: Sirf us chhote box ko padho jisme 1-3 links ho (Yani ek specific quality ka row)
-                        let container = $(el).parent();
-                        while (container.length > 0 && container.find('a').length <= 3) {
-                            let blockText = container.text().toLowerCase();
-                            
-                            if (targetSizeNum) {
-                                // Agar size mil gaya (e.g., "6.2"), toh match ho gaya
-                                if (blockText.includes(targetSizeNum)) {
-                                    isMatch = true;
-                                    break;
-                                }
-                            } else if (targetRes) {
-                                // Size na ho toh Res+Tags check karo
-                                if (blockText.includes(targetRes)) {
-                                    let hasAllTags = targetTags.every(t => blockText.includes(t));
-                                    if (hasAllTags) {
-                                        isMatch = true;
-                                        break;
-                                    }
-                                }
-                            } else {
-                                isMatch = true; // Agar user ke title mein size/res nahi tha
-                                break;
+                        let prevNode = parentNode.prev();
+                        for(let k = 0; k < 3; k++) {
+                            if(prevNode.length) {
+                                blockText += prevNode.text().toLowerCase() + " ";
+                                prevNode = prevNode.prev();
                             }
-                            container = container.parent();
+                        }
+                        blockText += $(el).text().toLowerCase();
+
+                        let isMatch = false;
+
+                        if (targetSizeNum) {
+                            if (blockText.includes(targetSizeNum)) isMatch = true;
+                        } else if (targetRes) {
+                            if (blockText.includes(targetRes)) {
+                                let hasAllTags = targetTags.every(t => blockText.includes(t));
+                                if (hasAllTags) isMatch = true;
+                            }
+                        } else {
+                            isMatch = true;
                         }
 
                         if (isMatch) {
@@ -236,17 +232,41 @@ app.post('/api/extract', async (req, res) => {
                     }
                 });
 
-                // (Safety fallback hata diya taaki ab kabhi bhi 12 kachra links na aaye)
-                // Sirf exact wahi aayega jo match hoga!
-                
-                // Remove duplicate links (Agar m4ulinks par ek hi box mein 2 same link the)
+                // Safety Fallback: Agar kisi wajah se Size se match na ho paaye, toh Resolution (e.g. 1080p) se check kar lo
+                if (urls.length === 0 && targetRes) {
+                    $('a').each((i, el) => {
+                        let href = $(el).attr('href');
+                        if (!href) return;
+                        if (href.includes('hubcloud') || href.includes('gdflix') || href.includes('gamerxyt') || href.includes('m4ulinks')) {
+                            
+                            let parentNode = $(el).parent();
+                            let blockText = parentNode.text().toLowerCase() + " ";
+                            let prevNode = parentNode.prev();
+                            for(let k = 0; k < 3; k++) {
+                                if(prevNode.length) {
+                                    blockText += prevNode.text().toLowerCase() + " ";
+                                    prevNode = prevNode.prev();
+                                }
+                            }
+                            
+                            if (blockText.includes(targetRes)) {
+                                if (/^https:\/\/vifix\.site\/hubcloud\/([a-z0-9]+)$/i.test(href)) {
+                                    href = `https://hubcloud.one/drive/${href.split("/").pop()}`;
+                                }
+                                urls.push({ genUrl: href, episode: lockedEpisode, quality: lockedQuality });
+                            }
+                        }
+                    });
+                }
+
+                // Remove exact duplicates
                 return urls.filter((v, i, a) => a.findIndex(t => (t.genUrl === v.genUrl)) === i);
             } catch (e) { return []; }
         });
         
         const allInterUrls = (await Promise.all(interPromises)).flat();
 
-        // Step 3: HubCloud (Seedha Bypass)
+        // Step 3: HubCloud Bypass
         const hubPromises = allInterUrls.map(async (item) => {
             try {
                 const hubRes = await axios.get(item.genUrl, { headers: HEADERS, timeout: 10000 });
@@ -272,7 +292,7 @@ app.post('/api/extract', async (req, res) => {
             if(!seenGen.has(item.url)){ seenGen.add(item.url); uniqueGenUrls.push(item); }
         });
 
-        // Step 4: Final Server Links
+        // Step 4: Final Links Extraction
         const genPromises = uniqueGenUrls.map(async (item) => {
             if (seenGenerators.has(item.url)) return [];
             seenGenerators.add(item.url);
@@ -314,7 +334,6 @@ app.post('/api/extract', async (req, res) => {
                             }
                         }
 
-                        // Exact wahi original naam (item.quality) yahan pass hoga
                         extracted.push({ server: exactName, url: href, episode: item.episode, quality: item.quality });
                     }
                 });
@@ -339,7 +358,7 @@ app.post('/api/extract', async (req, res) => {
 
         rawFinalLinks = await Promise.all(doubleBypassPromises);
 
-        // 🔥 Duplicate Link Hatao
+        // Duplicate links hatana
         rawFinalLinks.forEach(f => {
             let isDuplicate = finalLinks.some(exist => exist.url === f.url);
             if (!isDuplicate) finalLinks.push(f);
