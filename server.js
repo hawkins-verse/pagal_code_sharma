@@ -64,7 +64,7 @@ app.get('/api/suggest', async (req, res) => {
     } catch (e) { res.json([]); }
 });
 
-// 🌟 100x DEEP SCAN SEARCH LOGIC - STRICT BARRIERS REMOVED (BUG FIXED) 🌟
+// 🌟 100x DEEP SCAN SEARCH LOGIC - STRICT BARRIERS REMOVED (WRAPPER BUG FIXED) 🌟
 app.get('/api/search', async (req, res) => {
     const movieName = req.query.q;
     const movieUrlParam = req.query.url;
@@ -93,25 +93,29 @@ app.get('/api/search', async (req, res) => {
         let qualities = new Set();
         let downloadLinks = [];
         let currentQuality = "Default Quality";
-        let stopParsing = false; // 🔥 NAYA STOPPER (Brake) ADD KIYA
+        let stopParsing = false; // 🔥 STOPPER (Brake) 
 
         $$('h2, h3, h4, h5, h6, p, div, span, strong, b, a').each((i, el) => {
-            if (stopParsing) return; // Agar brake lag gaya hai, toh aage ka kachra nahi padhega
+            if (stopParsing) return; 
 
             const tagName = el.tagName.toLowerCase();
             const text = $$(el).text().replace(/\s+/g, ' ').trim();
             const lowerText = text.toLowerCase();
 
-            // 🔥 LOGIC 2: Jaise hi "You May Also Like" ya "Related" aayega, code wahi ruk jayega!
-            if (lowerText.includes('you may also like') || lowerText.includes('related') || lowerText.includes('leave a reply') || lowerText.includes('similar')) {
-                stopParsing = true;
-                return;
+            // 🔥 MAIN FIX: "text.length < 80" lagaya taaki bade wrapper <div> par brake na lage!
+            if (text.length > 0 && text.length < 80) {
+                if (lowerText === 'you may also like' || lowerText === 'related' || lowerText.includes('related movies') || lowerText.includes('leave a reply') || lowerText.includes('similar')) {
+                    stopParsing = true;
+                    return;
+                }
             }
 
             if (tagName !== 'a') {
                 if (/(480p|720p|1080p|2160p|4k|Season|Episode|Pack|Complete)/i.test(text) && text.length > 3 && text.length < 150) {
-                    currentQuality = text.replace(/(Download|Links|Here|Now|-)/gi, '').trim();
-                    qualities.add(currentQuality);
+                    if (!lowerText.includes('you may also like') && !lowerText.includes('related')) {
+                        currentQuality = text.replace(/(Download|Links|Here|Now|-)/gi, '').trim();
+                        qualities.add(currentQuality);
+                    }
                 }
             }
 
@@ -137,7 +141,7 @@ app.get('/api/search', async (req, res) => {
                     let epMatch = text.match(/(E\d+|Ep\s*\d+|Episode\s*\d+|Pack|Season\s*\d+)/i);
                     let episode = epMatch ? epMatch[0].toUpperCase() : 'Movie';
 
-                    // 🔥 LOGIC 1: "All Available Links" hata diya gaya hai. Ab directly movie ka naam aayega.
+                    // "All Available Links" ko hatakar seedha Movie ka Title de dega
                     if (currentQuality === "Default Quality") {
                         currentQuality = titleText; 
                         qualities.add(currentQuality);
@@ -152,7 +156,7 @@ app.get('/api/search', async (req, res) => {
             }
         });
 
-        // Double check: Galti se bhi faltu string na bache
+        // Double check: Faltu values filter out kar rahe hain
         let finalQualities = Array.from(qualities).filter(q => q !== "All Available Links" && q !== "Default Quality");
 
         res.json({ title: titleText, qualities: finalQualities, links: downloadLinks });
@@ -160,7 +164,6 @@ app.get('/api/search', async (req, res) => {
         res.status(500).json({ error: e.message });
     }
 });
-
 // 🔥 THE MASTERMIND EXTRACTION LOGIC (Now with Auto-Episode Detection!) 🔥
 app.post('/api/extract', async (req, res) => {
     const { links } = req.body;
