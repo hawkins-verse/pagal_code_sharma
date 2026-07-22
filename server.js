@@ -169,7 +169,7 @@ app.post('/api/extract', async (req, res) => {
     let finalLinks = [];
     let seenGenerators = new Set();
 
-    // 🔥 SMART RESOLUTION EXTRACTOR (Sirf base resolution dekhega, extra strictness hatayi)
+    // 🔥 SMART BASE RESOLUTION MATCHER
     const getBaseRes = (str) => {
         if (!str) return null;
         let match = str.match(/(480p|720p|1080p|2160p|4k)/i);
@@ -186,7 +186,7 @@ app.post('/api/extract', async (req, res) => {
                     urlToFetch = `https://hubcloud.one/drive/${urlToFetch.split("/").pop()}`;
                 }
 
-                // Target resolution user ke selection se nikala
+                // User ne jo UI se select kiya hai
                 const targetRes = getBaseRes(linkObj.quality || "");
 
                 const linkRes = await axios.get(urlToFetch, { headers: HEADERS, timeout: 12000 });
@@ -195,47 +195,41 @@ app.post('/api/extract', async (req, res) => {
                 let currentEpisode = linkObj.episode; 
                 let currentQualityText = linkObj.quality; 
 
-                $('*').each((i, el) => {
-                    const tagName = el.tagName.toLowerCase();
+                $('a').each((i, el) => {
+                    let href = $(el).attr('href');
+                    if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
+
+                    let text = $(el).text().replace(/\s+/g, ' ').trim();
+                    let aQualityText = currentQualityText;
                     
-                    if (['p', 'div', 'h2', 'h3', 'h4', 'h5', 'span', 'strong', 'b', 'td', 'tr'].includes(tagName)) {
-                        let text = $(el).text().replace(/\s+/g, ' ').trim();
-                        if (text.length > 0 && text.length < 150) {
-                            let epMatch = text.match(/(?:[-:]\s*)?Ep(?:isode)?s?\s*[:\-]*\s*(\d+)/i);
-                            if (epMatch) currentEpisode = `E${epMatch[1].padStart(2, '0')}`;
-                        }
+                    if (/(480p|720p|1080p|2160p|4k)/i.test(text)) {
+                        aQualityText = text; // Agar link mein resolution likha hai, toh usko pakdo
                     }
 
-                    if (tagName === 'a') {
-                        let href = $(el).attr('href');
-                        if (href) {
-                            let text = $(el).text().replace(/\s+/g, ' ').trim();
-                            let aQualityText = currentQualityText;
-                            
-                            if (/(480p|720p|1080p|2160p|4k)/i.test(text)) {
-                                aQualityText = text;
-                            }
+                    // 🚨 BALANCED FILTER: Sirf tabhi reject karega jab resolution clearly alag ho 
+                    // (e.g. Manga 1080p tha, par link 720p ka nikla). 
+                    // Agar resolution nahi likha hai, toh pass hone dega!
+                    if (targetRes) {
+                        let linkResMatch = getBaseRes(aQualityText);
+                        if (linkResMatch && linkResMatch !== targetRes) return; 
+                    }
 
-                            // 🚨 MAIN FIX: Sirf 1080p vs 720p ka check (Over-strict Tag filter removed)
-                            if (targetRes) {
-                                let linkRes = getBaseRes(aQualityText);
-                                // Agar link kisi aur resolution ka hai, tabhi reject karo
-                                if (linkRes && linkRes !== targetRes) return; 
-                            }
-
-                            if (/^https:\/\/vifix\.site\/hubcloud\/([a-z0-9]+)$/i.test(href)) {
-                                href = `https://hubcloud.one/drive/${href.split("/").pop()}`;
-                            }
-                            if (href.includes('hubcloud') || href.includes('gdflix') || href.includes('gamerxyt')) {
-                                // Pura name save kar rahe hain taaki UI mein wahi dikhe
-                                urls.push({ genUrl: href, episode: currentEpisode, quality: currentQualityText });
-                            }
-                        }
+                    if (/^https:\/\/vifix\.site\/hubcloud\/([a-z0-9]+)$/i.test(href)) {
+                        href = `https://hubcloud.one/drive/${href.split("/").pop()}`;
+                    }
+                    
+                    // Saare valid intermediate links ko capture karna (M4uLinks add kiya)
+                    const isValidHop = href.includes('hubcloud') || href.includes('gdflix') || 
+                                       href.includes('gamerxyt') || href.includes('m4ulinks');
+                                       
+                    if (isValidHop) {
+                        urls.push({ genUrl: href, episode: currentEpisode, quality: currentQualityText });
                     }
                 });
                 return urls;
             } catch (e) { return []; }
         });
+        
         const allInterUrls = (await Promise.all(interPromises)).flat();
 
         const hubPromises = allInterUrls.map(async (item) => {
@@ -243,12 +237,14 @@ app.post('/api/extract', async (req, res) => {
                 const hubRes = await axios.get(item.genUrl, { headers: HEADERS, timeout: 10000 });
                 const $ = cheerio.load(hubRes.data);
                 let genUrls = [];
+                
                 const downloadBtn = $('#download').attr('href');
                 if (downloadBtn) genUrls.push({ url: downloadBtn, episode: item.episode, quality: item.quality });
                 
                 $('a.btn, a').each((i, a) => {
                     const href = $(a).attr('href');
-                    if (href && (href.includes('gamerxyt.com') || href.includes('hubcloud.php'))) {
+                    // FastDL aur Gamerxyt dono capture honge
+                    if (href && (href.includes('gamerxyt.com') || href.includes('hubcloud.php') || href.includes('fastdl'))) {
                         genUrls.push({ url: href, episode: item.episode, quality: item.quality });
                     }
                 });
@@ -288,16 +284,10 @@ app.post('/api/extract', async (req, res) => {
                     const lowerHref = href.toLowerCase();
 
                     const blacklist = [
-                        't.me', 'telegram', '/tg/', 'telegram.me', 'telegram.dog', 
-                        'telegram.org', 'joinchat', 'tg://', '@', 'whatsapp', 
-                        'chat.whatsapp', 'discord'
+                        't.me', 'telegram', '/tg/', 'telegram.me', 'joinchat', 'whatsapp', 'discord'
                     ];
 
-                    if (
-                        blacklist.some(term => lowerText.includes(term) || lowerHref.includes(term)) ||
-                        lowerText.includes('telegram group') ||
-                        lowerText.includes('download from telegram')
-                    ) {
+                    if (blacklist.some(term => lowerText.includes(term) || lowerHref.includes(term))) {
                         return;
                     }
 
@@ -307,7 +297,7 @@ app.post('/api/extract', async (req, res) => {
                     const isExternal = lowerHref.includes("mediafire") || lowerHref.includes("mega.nz") || lowerHref.includes("dropbox");
                     const isPixel = lowerHref.includes("pixeldrain");
                     
-                    const legacyIndicators = ['10gbps', 'zipdisk', 'ddl', 'fsl', 'fslv2', 'fsl 2', 'server'];
+                    const legacyIndicators = ['10gbps', 'zipdisk', 'ddl', 'fsl', 'fslv2', 'fsl 2', 'server', 'buzz'];
                     const hasLegacy = legacyIndicators.some(ind => lowerText.includes(ind) || lowerHref.includes(ind));
                     
                     if (isDirectFile || isCloudflare || isDrive || isExternal || isPixel || hasLegacy) {
@@ -347,7 +337,7 @@ app.post('/api/extract', async (req, res) => {
 
         rawFinalLinks = await Promise.all(doubleBypassPromises);
 
-        // 🔥 DEDUPLICATION FIX (Extra duplicate links ko safa karne ke liye)
+        // 🔥 DEDUPLICATION FIX: Ek jaise 2 link ko hatane ka system (Sirf unique server bachenge)
         rawFinalLinks.forEach(f => {
             let isDuplicate = finalLinks.some(exist => 
                 exist.url === f.url || 
