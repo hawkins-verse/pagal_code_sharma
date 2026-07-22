@@ -64,7 +64,7 @@ app.get('/api/suggest', async (req, res) => {
     } catch (e) { res.json([]); }
 });
 
-// 🌟 100x DEEP SCAN SEARCH LOGIC (WATCH ONLINE & MULTI-RES TITLE BUG FIXED) 🌟
+// 🌟 100x DEEP SCAN SEARCH LOGIC (BUG FIXED: ONLY BUTTON LABELS) 🌟
 app.get('/api/search', async (req, res) => {
     const movieName = req.query.q;
     const movieUrlParam = req.query.url;
@@ -92,7 +92,7 @@ app.get('/api/search', async (req, res) => {
         
         let qualities = new Set();
         let downloadLinks = [];
-        let currentQuality = null; 
+        let currentQuality = null; // Default kachra hata diya
         let stopParsing = false; 
 
         $$('h2, h3, h4, h5, h6, p, div, span, strong, b, a').each((i, el) => {
@@ -102,7 +102,7 @@ app.get('/api/search', async (req, res) => {
             const text = $$(el).text().replace(/\s+/g, ' ').trim();
             const lowerText = text.toLowerCase();
 
-            // Stopper (Brake) taaki "You May Also Like" ka kachra na aaye
+            // Stopper (Brake) taaki You May Also Like ka kachra na aaye
             if (text.length > 0 && text.length < 80) {
                 if (lowerText === 'you may also like' || lowerText === 'related' || lowerText.includes('related movies') || lowerText.includes('leave a reply') || lowerText.includes('similar')) {
                     stopParsing = true;
@@ -111,13 +111,12 @@ app.get('/api/search', async (req, res) => {
             }
 
             if (tagName !== 'a') {
+                // Sirf wahi text padhega jo 120 characters se chota ho (Bade paragraph aur title ko block karne ke liye)
                 if (/(480p|720p|1080p|2160p|4k|Season|Episode|Pack|Complete)/i.test(text) && text.length > 3 && text.length < 120) {
-                    if (!lowerText.includes('download in') && !lowerText.includes('optimized file sizes')) {
-                        // 🔥 FIX 1: Agar ek line mein 3 ya usse zyada resolution hain, toh wo poster title hai, box nahi. Reject it!
-                        let resCount = (lowerText.match(/480p|720p|1080p|2160p|4k/g) || []).length;
-                        if (resCount < 3) {
-                            currentQuality = text.replace(/(Download|Links|Here|Now|-)/gi, '').trim();
-                        }
+                    // Paragraph description "Download in 480p, 720p..." ko ignore karega
+                    if (!lowerText.includes('download in 480p') && !lowerText.includes('optimized file sizes')) {
+                        // Naam yaad rakhega, par list mein ABHI nahi dalega!
+                        currentQuality = text.replace(/(Download|Links|Here|Now|-)/gi, '').trim();
                     }
                 }
             }
@@ -139,23 +138,18 @@ app.get('/api/search', async (req, res) => {
                     hrefLower.includes('telegram') || hrefLower.includes('t.me') ||
                     hrefLower.includes('/tg/') || lowerText.includes('telegram') ||
                     lowerText.includes('download from telegram');
-                
-                // 🔥 FIX 2: "Watch Online" button ko strict block kiya!
-                const isWatchOnline = lowerText.includes('watch') || hrefLower.includes('watch');
 
-                if (isDownloadLink && !isTelegram && !isWatchOnline) {
+                if (isDownloadLink && !isTelegram) {
                     let epMatch = text.match(/(E\d+|Ep\s*\d+|Episode\s*\d+|Pack|Season\s*\d+)/i);
                     let episode = epMatch ? epMatch[0].toUpperCase() : 'Movie';
 
+                    // Agar upar koi naam nahi mila, tabhi title use karega
                     let finalQualityName = currentQuality;
                     if (!finalQualityName) {
-                        // Agar fir bhi koi fallback aata hai, toh lamba naam truncate (chota) kar dega
-                        finalQualityName = titleText.split(/480p|720p|1080p|2160p|4k/i)[0].trim();
-                        if (finalQualityName.endsWith('|') || finalQualityName.endsWith('-')) {
-                            finalQualityName = finalQualityName.slice(0, -1).trim();
-                        }
+                        finalQualityName = titleText; 
                     }
 
+                    // 🔥 MAIN FIX: Jab Download Link milega, SIRF tabhi naam ko dropdown list mein add karega!
                     qualities.add(finalQualityName);
 
                     downloadLinks.push({ 
