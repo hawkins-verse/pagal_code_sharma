@@ -169,21 +169,13 @@ app.post('/api/extract', async (req, res) => {
     let finalLinks = [];
     let seenGenerators = new Set();
 
-    // 🔥 SMART TAG EXTRACTOR (1080p ke alag-alag variants pehchanne ke liye)
-    const getQualityTags = (str) => {
-        if (!str) return { res: null, tags: [] };
-        
-        let resMatch = str.match(/(480p|720p|1080p|2160p|4k)/i);
-        let res = resMatch ? resMatch[0].toLowerCase() : null;
-        if (res === '4k') res = '2160p'; // 4k aur 2160p ko ek hi manega
-        
-        let tags = [];
-        if (/10-?bit/i.test(str)) tags.push('10bit');
-        if (/(hevc|x265)/i.test(str)) tags.push('hevc');
-        if (/\bhq\b/i.test(str)) tags.push('hq');
-        if (/\bhdr\b/i.test(str)) tags.push('hdr');
-        
-        return { res, tags };
+    // 🔥 SMART RESOLUTION EXTRACTOR (Sirf base resolution dekhega, extra strictness hatayi)
+    const getBaseRes = (str) => {
+        if (!str) return null;
+        let match = str.match(/(480p|720p|1080p|2160p|4k)/i);
+        if (!match) return null;
+        let res = match[0].toLowerCase();
+        return res === '4k' ? '2160p' : res; 
     };
 
     try {
@@ -194,8 +186,8 @@ app.post('/api/extract', async (req, res) => {
                     urlToFetch = `https://hubcloud.one/drive/${urlToFetch.split("/").pop()}`;
                 }
 
-                // 🔥 User ne jo exact quality (aur uske tags) mangi hai
-                const targetInfo = getQualityTags(linkObj.quality || "");
+                // Target resolution user ke selection se nikala
+                const targetRes = getBaseRes(linkObj.quality || "");
 
                 const linkRes = await axios.get(urlToFetch, { headers: HEADERS, timeout: 12000 });
                 const $ = cheerio.load(linkRes.data);
@@ -211,9 +203,6 @@ app.post('/api/extract', async (req, res) => {
                         if (text.length > 0 && text.length < 150) {
                             let epMatch = text.match(/(?:[-:]\s*)?Ep(?:isode)?s?\s*[:\-]*\s*(\d+)/i);
                             if (epMatch) currentEpisode = `E${epMatch[1].padStart(2, '0')}`;
-                            
-                            let qMatch = text.match(/(480p|720p|1080p|2160p|4k)/i);
-                            if (qMatch) currentQualityText = text; // Sirf resolution nahi, pura text save karo
                         }
                     }
 
@@ -227,30 +216,19 @@ app.post('/api/extract', async (req, res) => {
                                 aQualityText = text;
                             }
 
-                            // 🚨 MAIN FIX: ADVANCED STRICT TAG FILTER 🚨
-                            if (targetInfo.res) {
-                                let linkInfo = getQualityTags(aQualityText);
-                                
-                                // 1. Base Resolution Check (e.g., dono 1080p hone chahiye)
-                                if (linkInfo.res && linkInfo.res !== targetInfo.res) return;
-                                
-                                // 2. Tags Check (e.g., 10bit, hevc, hq). Ekdam strict match!
-                                const checkTags = ['10bit', 'hevc', 'hq', 'hdr'];
-                                for (let tag of checkTags) {
-                                    let wantsTag = targetInfo.tags.includes(tag);
-                                    let hasTag = linkInfo.tags.includes(tag);
-                                    
-                                    // Agar user ne 'hevc' manga hai aur link mein nahi hai, toh Reject!
-                                    // Ya user ne normal manga hai aur link mein 'hevc' hai, toh Reject!
-                                    if (wantsTag !== hasTag) return; 
-                                }
+                            // 🚨 MAIN FIX: Sirf 1080p vs 720p ka check (Over-strict Tag filter removed)
+                            if (targetRes) {
+                                let linkRes = getBaseRes(aQualityText);
+                                // Agar link kisi aur resolution ka hai, tabhi reject karo
+                                if (linkRes && linkRes !== targetRes) return; 
                             }
 
                             if (/^https:\/\/vifix\.site\/hubcloud\/([a-z0-9]+)$/i.test(href)) {
                                 href = `https://hubcloud.one/drive/${href.split("/").pop()}`;
                             }
                             if (href.includes('hubcloud') || href.includes('gdflix') || href.includes('gamerxyt')) {
-                                urls.push({ genUrl: href, episode: currentEpisode, quality: aQualityText });
+                                // Pura name save kar rahe hain taaki UI mein wahi dikhe
+                                urls.push({ genUrl: href, episode: currentEpisode, quality: currentQualityText });
                             }
                         }
                     }
