@@ -155,7 +155,7 @@ app.get('/api/search', async (req, res) => {
     }
 });
 
-// 🔥 THE MASTERMIND EXTRACTION LOGIC (Based on your exact Size Matching Idea) 🔥
+// 🔥 THE MASTERMIND EXTRACTION LOGIC (Bug Fixed: Strict Container Matching) 🔥
 app.post('/api/extract', async (req, res) => {
     const { links } = req.body;
     let finalLinks = [];
@@ -182,7 +182,6 @@ app.post('/api/extract', async (req, res) => {
                 if (targetRes === '4k') targetRes = '2160p';
                 let targetTags = ['hevc', '10bit', 'hq', 'x264', 'x265', 'hdr'].filter(t => lockedQuality.toLowerCase().includes(t));
 
-                // Agar direct hubcloud link mila hai pehle se
                 if (urlToFetch.includes('hubcloud') || urlToFetch.includes('gdflix')) {
                     return [{ genUrl: urlToFetch, episode: lockedEpisode, quality: lockedQuality }];
                 }
@@ -199,22 +198,33 @@ app.post('/api/extract', async (req, res) => {
                     const isValidHop = href.includes('hubcloud') || href.includes('gdflix') || href.includes('gamerxyt') || href.includes('m4ulinks');
                     
                     if (isValidHop) {
-                        // Button ke aas-paas ka text pakdo (wahan size likha hota hai)
-                        let blockText = $(el).parent().parent().text().toLowerCase() + " " + $(el).parent().parent().parent().text().toLowerCase();
-                        
                         let isMatch = false;
-
-                        if (targetSizeNum) {
-                            // Agar size mil gaya (e.g., "6.2"), toh wo apna link hai!
-                            if (blockText.includes(targetSizeNum)) isMatch = true;
-                        } else if (targetRes) {
-                            // Size na ho toh Res+Tags check karo (e.g., "720p" + "HEVC")
-                            if (blockText.includes(targetRes)) {
-                                let hasAllTags = targetTags.every(t => blockText.includes(t));
-                                if (hasAllTags) isMatch = true;
+                        
+                        // 🔥 MAIN FIX: Sirf us chhote box ko padho jisme 1-3 links ho (Yani ek specific quality ka row)
+                        let container = $(el).parent();
+                        while (container.length > 0 && container.find('a').length <= 3) {
+                            let blockText = container.text().toLowerCase();
+                            
+                            if (targetSizeNum) {
+                                // Agar size mil gaya (e.g., "6.2"), toh match ho gaya
+                                if (blockText.includes(targetSizeNum)) {
+                                    isMatch = true;
+                                    break;
+                                }
+                            } else if (targetRes) {
+                                // Size na ho toh Res+Tags check karo
+                                if (blockText.includes(targetRes)) {
+                                    let hasAllTags = targetTags.every(t => blockText.includes(t));
+                                    if (hasAllTags) {
+                                        isMatch = true;
+                                        break;
+                                    }
+                                }
+                            } else {
+                                isMatch = true; // Agar user ke title mein size/res nahi tha
+                                break;
                             }
-                        } else {
-                            isMatch = true;
+                            container = container.parent();
                         }
 
                         if (isMatch) {
@@ -226,28 +236,17 @@ app.post('/api/extract', async (req, res) => {
                     }
                 });
 
-                // Safety: Agar kisi wajah se block text read nahi hua, toh backup ke liye sab link bhej do
-                if (urls.length === 0) {
-                    $('a').each((i, el) => {
-                        let href = $(el).attr('href');
-                        if (!href) return;
-                        if (href.includes('hubcloud') || href.includes('gdflix') || href.includes('gamerxyt') || href.includes('m4ulinks')) {
-                            if (/^https:\/\/vifix\.site\/hubcloud\/([a-z0-9]+)$/i.test(href)) {
-                                href = `https://hubcloud.one/drive/${href.split("/").pop()}`;
-                            }
-                            urls.push({ genUrl: href, episode: lockedEpisode, quality: lockedQuality });
-                        }
-                    });
-                }
-
-                // Remove duplicate links agar ek hi box mein do button the
+                // (Safety fallback hata diya taaki ab kabhi bhi 12 kachra links na aaye)
+                // Sirf exact wahi aayega jo match hoga!
+                
+                // Remove duplicate links (Agar m4ulinks par ek hi box mein 2 same link the)
                 return urls.filter((v, i, a) => a.findIndex(t => (t.genUrl === v.genUrl)) === i);
             } catch (e) { return []; }
         });
         
         const allInterUrls = (await Promise.all(interPromises)).flat();
 
-        // Step 3: HubCloud (Yaad rakho, ab yahan hum kuch nahi check kar rahe, seedha Bypass)
+        // Step 3: HubCloud (Seedha Bypass)
         const hubPromises = allInterUrls.map(async (item) => {
             try {
                 const hubRes = await axios.get(item.genUrl, { headers: HEADERS, timeout: 10000 });
@@ -273,7 +272,7 @@ app.post('/api/extract', async (req, res) => {
             if(!seenGen.has(item.url)){ seenGen.add(item.url); uniqueGenUrls.push(item); }
         });
 
-        // Step 4: Final Server Links (10Gbps, Direct File etc.)
+        // Step 4: Final Server Links
         const genPromises = uniqueGenUrls.map(async (item) => {
             if (seenGenerators.has(item.url)) return [];
             seenGenerators.add(item.url);
@@ -315,7 +314,7 @@ app.post('/api/extract', async (req, res) => {
                             }
                         }
 
-                        // Exact wahi original naam (item.quality) yahan pass hoga bina koi chhed-chhad kiye!
+                        // Exact wahi original naam (item.quality) yahan pass hoga
                         extracted.push({ server: exactName, url: href, episode: item.episode, quality: item.quality });
                     }
                 });
@@ -340,6 +339,7 @@ app.post('/api/extract', async (req, res) => {
 
         rawFinalLinks = await Promise.all(doubleBypassPromises);
 
+        // 🔥 Duplicate Link Hatao
         rawFinalLinks.forEach(f => {
             let isDuplicate = finalLinks.some(exist => exist.url === f.url);
             if (!isDuplicate) finalLinks.push(f);
@@ -350,6 +350,5 @@ app.post('/api/extract', async (req, res) => {
 
     res.json({ finalLinks });
 });
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Server running at port ${PORT}`));
