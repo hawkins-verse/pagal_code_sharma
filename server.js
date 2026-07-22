@@ -64,7 +64,7 @@ app.get('/api/suggest', async (req, res) => {
     } catch (e) { res.json([]); }
 });
 
-// 🌟 100x DEEP SCAN SEARCH LOGIC (FIXED FOR BOTH MOVIES & WEB SERIES) 🌟
+// 🌟 POWERFUL SEARCH LOGIC (WORKING CONCEPT + EXTRA NAMES CLEANED) 🌟
 app.get('/api/search', async (req, res) => {
     const movieName = req.query.q;
     const movieUrlParam = req.query.url;
@@ -92,115 +92,91 @@ app.get('/api/search', async (req, res) => {
         
         let qualities = new Set();
         let downloadLinks = [];
+        let currentQuality = "Default Quality";
+        let stopParsing = false;
 
-        // Check karo ki yeh Movie hai ya Web Series (URL ya Title mein Season/Show ho)
-        const isWebSeriesPage = /season|episode|tv show|series/i.test(titleText) || $$('body').text().toLowerCase().includes('season');
+        $$('h2, h3, h4, h5, h6, p, div, span, strong, b, a').each((i, el) => {
+            if (stopParsing) return;
 
-        if (isWebSeriesPage) {
-            // 🔥 WEB SERIES SCANNER (Purana wala trusted logic taaki episodes miss na ho)
-            let currentQuality = "Default Quality";
-            $$('h2, h3, h4, h5, h6, p, div, span, strong, b, a').each((i, el) => {
-                const tagName = el.tagName.toLowerCase();
-                const text = $$(el).text().replace(/\s+/g, ' ').trim();
-                const lowerText = text.toLowerCase();
+            const tagName = el.tagName.toLowerCase();
+            const text = $$(el).text().replace(/\s+/g, ' ').trim();
+            const lowerText = text.toLowerCase();
 
-                if (lowerText.includes('you may also like') || lowerText.includes('related')) return;
-
-                if (tagName !== 'a') {
-                    if (/(480p|720p|1080p|2160p|4k|Season|Episode|Pack)/i.test(text) && text.length > 3 && text.length < 120) {
-                        currentQuality = text.replace(/(Download|Links|Here|Now|-)/gi, '').trim();
-                        qualities.add(currentQuality);
-                    }
+            // Related movies / footer kachra rokne ke liye stopper
+            if (text.length > 0 && text.length < 80) {
+                if (lowerText === 'you may also like' || lowerText === 'related' || lowerText.includes('related movies') || lowerText.includes('leave a reply') || lowerText.includes('similar')) {
+                    stopParsing = true;
+                    return;
                 }
+            }
 
-                if (tagName === 'a') {
-                    const href = $$(el).attr('href');
-                    if (!href || href.startsWith('#') || href.includes('tag=')) return;
-
-                    const hrefLower = href.toLowerCase();
-                    const isDownloadLink = hrefLower.includes('hubcloud') || hrefLower.includes('m4ulinks') || hrefLower.includes('vifix') || hrefLower.includes('gdflix') || hrefLower.includes('fastdl');
-                    const isTelegram = hrefLower.includes('telegram') || hrefLower.includes('t.me');
-
-                    if (isDownloadLink && !isTelegram) {
-                        let epMatch = text.match(/(E\d+|Ep\s*\d+|Episode\s*\d+|Pack|Season\s*\d+)/i);
-                        let episode = epMatch ? epMatch[0].toUpperCase() : 'Movie';
-
-                        if (currentQuality === "Default Quality") {
-                            currentQuality = titleText;
-                            qualities.add(currentQuality);
+            if (tagName !== 'a') {
+                // Sirf wahi text uthao jisme resolution ya season/episode ho
+                const hasValidKeyword = /(480p|720p|1080p|2160p|4k|season|episode|pack|complete)/i.test(text);
+                if (hasValidKeyword && text.length > 3 && text.length < 130) {
+                    if (!lowerText.includes('download in') && !lowerText.includes('optimized file sizes')) {
+                        let resCount = (lowerText.match(/480p|720p|1080p|2160p|4k/g) || []).length;
+                        if (resCount < 3) {
+                            currentQuality = text.replace(/(Download|Links|Here|Now|-)/gi, '').trim();
                         }
-
-                        downloadLinks.push({ 
-                            quality: currentQuality, 
-                            episode: episode, 
-                            url: resolveUrl(movieUrl, href) 
-                        });
                     }
                 }
-            });
-        } else {
-            // 🔥 MOVIE SCANNER (Button ke upar wala exact clean name)
-            $$('a').each((i, el) => {
+            }
+
+            if (tagName === 'a') {
                 const href = $$(el).attr('href');
-                if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
+                if (!href || href.startsWith('#') || href.includes('tag=')) return;
 
                 const hrefLower = href.toLowerCase();
                 const className = ($$(el).attr('class') || '').toLowerCase();
-                const lowerText = $$(el).text().toLowerCase().trim();
                 
                 const isDownloadLink = 
                     hrefLower.includes('hubcloud') || hrefLower.includes('m4ulinks') || 
                     hrefLower.includes('vifix') || hrefLower.includes('gdflix') || hrefLower.includes('fastdl') ||
                     className.includes('btn') || className.includes('button') || 
-                    lowerText.includes('download links');
+                    text.toLowerCase().includes('download links');
 
                 const isTelegram = hrefLower.includes('telegram') || hrefLower.includes('t.me') || lowerText.includes('telegram');
                 const isWatchOnline = lowerText.includes('watch') || hrefLower.includes('watch');
 
                 if (isDownloadLink && !isTelegram && !isWatchOnline) {
-                    let qualityName = "";
-                    let prevElement = $$(el).parent().prev();
+                    let epMatch = text.match(/(E\d+|Ep\s*\d+|Episode\s*\d+|Pack|Season\s*\d+)/i);
+                    let episode = epMatch ? epMatch[0].toUpperCase() : 'Movie';
 
-                    for (let k = 0; k < 4; k++) {
-                        if (!prevElement.length) break;
-                        let txt = prevElement.text().replace(/\s+/g, ' ').trim();
-                        let lTxt = txt.toLowerCase();
-
-                        if (/(480p|720p|1080p|2160p|4k)/i.test(txt) && txt.length > 5 && txt.length < 150) {
-                            if (!lTxt.includes('download in') && !lTxt.includes('optimized file sizes')) {
-                                let resCount = (lTxt.match(/480p|720p|1080p|2160p|4k/g) || []).length;
-                                if (resCount < 3) {
-                                    qualityName = txt.replace(/Download Links?|Here|Now/gi, '').replace(/^[-:]+|[-:]+$/g, '').trim();
-                                    break;
-                                }
-                            }
-                        }
-                        prevElement = prevElement.prev();
+                    if (currentQuality === "Default Quality" || !currentQuality) {
+                        currentQuality = titleText; 
                     }
 
-                    if (!qualityName) {
-                        qualityName = titleText.split(/480p|720p|1080p|2160p|4k/i)[0].trim();
-                        if (qualityName.endsWith('|') || qualityName.endsWith('-')) qualityName = qualityName.slice(0, -1).trim();
-                    }
-
-                    qualities.add(qualityName);
+                    qualities.add(currentQuality);
 
                     downloadLinks.push({ 
-                        quality: qualityName, 
-                        episode: 'Movie', 
+                        quality: currentQuality, 
+                        episode: episode, 
                         url: resolveUrl(movieUrl, href) 
                     });
                 }
-            });
+            }
+        });
+
+        // 🔥 EXTRA NAMES CLEANING FILTER: Puraana main title ya bina resolution wala kachra hata do
+        let cleanQualities = Array.from(qualities).filter(q => {
+            const lq = q.toLowerCase();
+            const isJustTitle = lq === titleText.toLowerCase();
+            const hasValidInfo = /(480p|720p|1080p|2160p|4k|season|episode|pack)/i.test(lq);
+            return !isJustTitle && hasValidInfo;
+        });
+
+        if (cleanQualities.length === 0 && qualities.size > 0) {
+            cleanQualities = Array.from(qualities);
         }
 
-        res.json({ title: titleText, qualities: Array.from(qualities), links: downloadLinks });
+        res.json({ title: titleText, qualities: cleanQualities, links: downloadLinks });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
 });
 
-// 🔥 THE MASTERMIND EXTRACTION LOGIC (BULLETPROOF OLD & NEW MOVIES FIX) 🔥
+// 🔥 THE MASTERMIND EXTRACTION LOGIC (BULLETPROOF) 🔥
 app.post('/api/extract', async (req, res) => {
     const { links } = req.body;
     let finalLinks = [];
