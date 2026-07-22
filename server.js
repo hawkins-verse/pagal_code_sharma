@@ -64,6 +64,7 @@ app.get('/api/suggest', async (req, res) => {
     } catch (e) { res.json([]); }
 });
 
+// 🌟 CLEAN SEARCH LOGIC (ROBUST NAME MATCHER) 🌟
 app.get('/api/search', async (req, res) => {
     const movieName = req.query.q;
     const movieUrlParam = req.query.url;
@@ -144,16 +145,12 @@ app.get('/api/search', async (req, res) => {
                     }
 
                     qualities.add(currentQuality);
-
-                    downloadLinks.push({ 
-                        quality: currentQuality, 
-                        episode: episode, 
-                        url: resolveUrl(movieUrl, href) 
-                    });
+                    downloadLinks.push({ quality: currentQuality, episode: episode, url: resolveUrl(movieUrl, href) });
                 }
             }
         });
 
+        // Filter valid qualities only
         let cleanQualities = Array.from(qualities).filter(q => {
             const lq = q.toLowerCase();
             const isJustTitle = lq === titleText.toLowerCase();
@@ -171,7 +168,7 @@ app.get('/api/search', async (req, res) => {
     }
 });
 
-// 🔥 THE MASTERMIND EXTRACTION LOGIC (PIXELDRAIN .DEV FIX INCLUDED) 🔥
+// 🔥 THE MASTERMIND EXTRACTION LOGIC (PIXELDRAIN REGEX & FALLBACK FIX) 🔥
 app.post('/api/extract', async (req, res) => {
     const { links } = req.body;
     let finalLinks = [];
@@ -268,6 +265,7 @@ app.post('/api/extract', async (req, res) => {
                     }
                 }
 
+                // Fallback: Drop mat karo, saare links utha lo
                 if (matchedUrls.length === 0 && urlObjs.length > 0) {
                     matchedUrls = urlObjs; 
                 }
@@ -356,21 +354,28 @@ app.post('/api/extract', async (req, res) => {
                         let exactName = text.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
                         if(!exactName || exactName.length > 30) exactName = "Download Server";
 
-                        // 🔥 PIXELDRAIN FIX: .com hٹا kar .dev kiya aur original URL structure lagaya
+                        // 🔥 FIXED PIXELDRAIN REGEX: Ab /api/file/ aur /u/ dono perfectly match honge
                         if (isPixel) {
                             if (jsPixelUrl) href = jsPixelUrl;
-                            const id = href.match(/\/u\/([^/?#]+)/i)?.[1];
-                            if (id) {
-                                href = `https://pixeldrain.dev/u/${id}`;
-                                // exactName ko overwrite karna band kar diya taaki original naam aaye
+                            const idMatch = href.match(/\/(?:u|api\/file)\/([^/?#]+)/i);
+                            if (idMatch) {
+                                href = `https://pixeldrain.dev/u/${idMatch[1]}`;
                             }
                         }
 
                         extracted.push({ server: exactName, url: href, episode: item.episode, quality: item.quality });
                     }
                 });
+
+                // 🔥 BRAHMASTRA FALLBACK: Agar page dead bhi ho jaye tabhi purana link wapas de dega!
+                if (extracted.length === 0) {
+                    extracted.push({ server: "Direct Source Link", url: item.url, episode: item.episode, quality: item.quality });
+                }
+
                 return extracted;
-            } catch (e) { return []; }
+            } catch (e) { 
+                return [{ server: "Source URL (Bypass Failed)", url: item.url, episode: item.episode, quality: item.quality }];
+            }
         });
 
         let rawFinalLinks = (await Promise.all(genPromises)).flat();
