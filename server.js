@@ -14,13 +14,26 @@ app.get('/', (req, res) => {
 });
 
 const HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.5',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1'
 };
 
 let currentBaseUrl = "https://new1.movies4u.clinic";
 
 function resolveUrl(base, relative) {
     try { return new URL(relative, base).href; } catch { return relative; }
+}
+
+// 🔥 HUBCLOUD CLOUDFLARE BYPASS FUNCTION 🔥
+function fixHubCloudUrl(url) {
+    const match = url.match(/(?:vifix\.site\/hubcloud|hubcloud\.[a-z]+\/(?:video|drive|out))\/([a-zA-Z0-9]+)/i);
+    if (match) {
+        return `https://hubcloud.one/drive/${match[1]}`;
+    }
+    return url;
 }
 
 app.post('/api/update-url', (req, res) => {
@@ -150,7 +163,6 @@ app.get('/api/search', async (req, res) => {
             }
         });
 
-        // Filter valid qualities only
         let cleanQualities = Array.from(qualities).filter(q => {
             const lq = q.toLowerCase();
             const isJustTitle = lq === titleText.toLowerCase();
@@ -168,7 +180,7 @@ app.get('/api/search', async (req, res) => {
     }
 });
 
-// 🔥 THE MASTERMIND EXTRACTION LOGIC (PIXELDRAIN REGEX & FALLBACK FIX) 🔥
+// 🔥 THE MASTERMIND EXTRACTION LOGIC (CLOUDFLARE BYPASS & PIXELDRAIN FIX) 🔥
 app.post('/api/extract', async (req, res) => {
     const { links } = req.body;
     let finalLinks = [];
@@ -178,10 +190,7 @@ app.post('/api/extract', async (req, res) => {
         const interPromises = links.map(async (linkObj) => {
             try {
                 let urlToFetch = linkObj.url;
-                if (/^https:\/\/vifix\.site\/hubcloud\/([a-z0-9]+)$/i.test(urlToFetch)) {
-                    urlToFetch = `https://hubcloud.one/drive/${urlToFetch.split("/").pop()}`;
-                }
-
+                
                 const lockedQuality = linkObj.quality || ""; 
                 const lockedEpisode = linkObj.episode || "Movie";
 
@@ -195,7 +204,7 @@ app.post('/api/extract', async (req, res) => {
 
                 const directHosts = ['hubcloud', 'gdflix', 'vifix', 'fastdl', 'filepress', 'gofile'];
                 if (directHosts.some(host => urlToFetch.toLowerCase().includes(host))) {
-                    return [{ genUrl: urlToFetch, episode: lockedEpisode, quality: lockedQuality }];
+                    return [{ genUrl: fixHubCloudUrl(urlToFetch), episode: lockedEpisode, quality: lockedQuality }];
                 }
 
                 const linkRes = await axios.get(urlToFetch, { headers: HEADERS, timeout: 12000 });
@@ -265,17 +274,14 @@ app.post('/api/extract', async (req, res) => {
                     }
                 }
 
-                // Fallback: Drop mat karo, saare links utha lo
                 if (matchedUrls.length === 0 && urlObjs.length > 0) {
                     matchedUrls = urlObjs; 
                 }
 
                 let urls = [];
                 matchedUrls.forEach(obj => {
-                    let href = obj.href;
-                    if (/^https:\/\/vifix\.site\/hubcloud\/([a-z0-9]+)$/i.test(href)) {
-                        href = `https://hubcloud.one/drive/${href.split("/").pop()}`;
-                    }
+                    // Yahan bhi URL clean karega
+                    let href = fixHubCloudUrl(obj.href);
                     urls.push({ genUrl: href, episode: obj.linkEpisode, quality: lockedQuality });
                 });
 
@@ -354,7 +360,6 @@ app.post('/api/extract', async (req, res) => {
                         let exactName = text.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
                         if(!exactName || exactName.length > 30) exactName = "Download Server";
 
-                        // 🔥 FIXED PIXELDRAIN REGEX: Ab /api/file/ aur /u/ dono perfectly match honge
                         if (isPixel) {
                             if (jsPixelUrl) href = jsPixelUrl;
                             const idMatch = href.match(/\/(?:u|api\/file)\/([^/?#]+)/i);
@@ -367,14 +372,14 @@ app.post('/api/extract', async (req, res) => {
                     }
                 });
 
-                // 🔥 BRAHMASTRA FALLBACK: Agar page dead bhi ho jaye tabhi purana link wapas de dega!
                 if (extracted.length === 0) {
-                    extracted.push({ server: "Direct Source Link", url: item.url, episode: item.episode, quality: item.quality });
+                    extracted.push({ server: "Direct Link (Server Protected)", url: item.url, episode: item.episode, quality: item.quality });
                 }
 
                 return extracted;
             } catch (e) { 
-                return [{ server: "Source URL (Bypass Failed)", url: item.url, episode: item.episode, quality: item.quality }];
+                // Agar server completely reject karde
+                return [{ server: "Direct Link (Server Protected)", url: item.url, episode: item.episode, quality: item.quality }];
             }
         });
 
