@@ -64,7 +64,7 @@ app.get('/api/suggest', async (req, res) => {
     } catch (e) { res.json([]); }
 });
 
-// 🌟 POWERFUL SEARCH LOGIC (WORKING CONCEPT + EXTRA NAMES CLEANED) 🌟
+// 🌟 CLEAN SEARCH LOGIC (PROVEN CONCEPT + EXTRA NAMES REMOVED) 🌟
 app.get('/api/search', async (req, res) => {
     const movieName = req.query.q;
     const movieUrlParam = req.query.url;
@@ -102,7 +102,6 @@ app.get('/api/search', async (req, res) => {
             const text = $$(el).text().replace(/\s+/g, ' ').trim();
             const lowerText = text.toLowerCase();
 
-            // Related movies / footer kachra rokne ke liye stopper
             if (text.length > 0 && text.length < 80) {
                 if (lowerText === 'you may also like' || lowerText === 'related' || lowerText.includes('related movies') || lowerText.includes('leave a reply') || lowerText.includes('similar')) {
                     stopParsing = true;
@@ -111,9 +110,7 @@ app.get('/api/search', async (req, res) => {
             }
 
             if (tagName !== 'a') {
-                // Sirf wahi text uthao jisme resolution ya season/episode ho
-                const hasValidKeyword = /(480p|720p|1080p|2160p|4k|season|episode|pack|complete)/i.test(text);
-                if (hasValidKeyword && text.length > 3 && text.length < 130) {
+                if (/(480p|720p|1080p|2160p|4k|Season|Episode|Pack|Complete)/i.test(text) && text.length > 3 && text.length < 130) {
                     if (!lowerText.includes('download in') && !lowerText.includes('optimized file sizes')) {
                         let resCount = (lowerText.match(/480p|720p|1080p|2160p|4k/g) || []).length;
                         if (resCount < 3) {
@@ -158,7 +155,7 @@ app.get('/api/search', async (req, res) => {
             }
         });
 
-        // 🔥 EXTRA NAMES CLEANING FILTER: Puraana main title ya bina resolution wala kachra hata do
+        // Faltu aur pure title wale names hatane ke liye filter
         let cleanQualities = Array.from(qualities).filter(q => {
             const lq = q.toLowerCase();
             const isJustTitle = lq === titleText.toLowerCase();
@@ -176,7 +173,7 @@ app.get('/api/search', async (req, res) => {
     }
 });
 
-// 🔥 THE MASTERMIND EXTRACTION LOGIC (BULLETPROOF) 🔥
+// 🔥 THE PROVEN ROBUST EXTRACTION LOGIC (NO MORE "NO LINKS FOUND") 🔥
 app.post('/api/extract', async (req, res) => {
     const { links } = req.body;
     let finalLinks = [];
@@ -222,16 +219,14 @@ app.post('/api/extract', async (req, res) => {
                         let headerText = "";
                         let curr = $(el).parent();
                         
-                        while (curr.length > 0 && curr.prop('tagName') !== 'BODY') {
-                            let txt = curr.text().toLowerCase().replace(/\s+/g, ' ').trim();
+                        for (let k = 0; k < 6; k++) {
+                            if (!curr.length || curr.prop('tagName') === 'HR') break;
+                            let txt = curr.text().toLowerCase();
                             if (/(480p|720p|1080p|2160p|4k|episode|ep\s*\d+|e\d+)/i.test(txt)) {
-                                let resCount = (txt.match(/480p|720p|1080p|2160p|4k/g) || []).length;
-                                if (txt.length < 350 && resCount <= 3) {
-                                    headerText = txt;
-                                    break;
-                                }
+                                headerText = txt;
+                                break;
                             }
-                            curr = curr.parent();
+                            curr = curr.prev();
                         }
                         
                         if (!headerText) headerText = $(el).text().toLowerCase() + " " + $(el).parent().text().toLowerCase();
@@ -275,8 +270,9 @@ app.post('/api/extract', async (req, res) => {
                     }
                 }
 
+                // Fallback: Agar exact match na ho toh saare links le lo taaki "No links found" na aaye
                 if (matchedUrls.length === 0 && urlObjs.length > 0) {
-                    matchedUrls = [urlObjs[0]]; 
+                    matchedUrls = urlObjs; 
                 }
 
                 let urls = [];
