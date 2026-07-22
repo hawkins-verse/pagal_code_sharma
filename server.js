@@ -173,7 +173,7 @@ app.get('/api/search', async (req, res) => {
     }
 });
 
-// 🔥 THE PROVEN ROBUST EXTRACTION LOGIC (NO MORE "NO LINKS FOUND") 🔥
+// 🔥 THE MASTERMIND EXTRACTION LOGIC (WITH HUBCLOUD CUSTOM ALERT FIX) 🔥
 app.post('/api/extract', async (req, res) => {
     const { links } = req.body;
     let finalLinks = [];
@@ -212,6 +212,7 @@ app.post('/api/extract', async (req, res) => {
                     let href = $(el).attr('href');
                     if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
 
+                    // 🔥 GDFlix aur baaki saare hosting domains allow kiye taaki link miss na ho
                     const validDomains = ['hubcloud', 'gdflix', 'gamerxyt', 'm4ulinks', 'vifix', 'fastdl', 'filepress', 'gofile', 'dropgalaxy', 'clicknupload'];
                     const isValidHop = validDomains.some(domain => href.toLowerCase().includes(domain));
                     
@@ -270,7 +271,6 @@ app.post('/api/extract', async (req, res) => {
                     }
                 }
 
-                // Fallback: Agar exact match na ho toh saare links le lo taaki "No links found" na aaye
                 if (matchedUrls.length === 0 && urlObjs.length > 0) {
                     matchedUrls = urlObjs; 
                 }
@@ -301,7 +301,7 @@ app.post('/api/extract', async (req, res) => {
                 
                 $('a.btn, a').each((i, a) => {
                     const href = $(a).attr('href');
-                    if (href && (href.includes('gamerxyt.com') || href.includes('hubcloud.php') || href.includes('fastdl'))) {
+                    if (href && (href.includes('gamerxyt.com') || href.includes('hubcloud.php') || href.includes('fastdl') || href.includes('gdflix'))) {
                         genUrls.push({ url: href, episode: item.episode, quality: item.quality });
                     }
                 });
@@ -351,7 +351,7 @@ app.post('/api/extract', async (req, res) => {
                     const isDrive = lowerHref.includes("googleusercontent.com") || lowerHref.includes("drive.google.com");
                     const isExternal = lowerHref.includes("mediafire") || lowerHref.includes("mega.nz") || lowerHref.includes("dropbox");
                     const isPixel = lowerHref.includes("pixeldrain");
-                    const hasLegacy = ['10gbps', 'zipdisk', 'ddl', 'fsl', 'server', 'buzz', 'gofile', 'clicknupload', 'filepress'].some(ind => lowerHref.includes(ind) || lowerText.includes(ind));
+                    const hasLegacy = ['10gbps', 'zipdisk', 'ddl', 'fsl', 'server', 'buzz', 'gofile', 'clicknupload', 'filepress', 'gdflix'].some(ind => lowerHref.includes(ind) || lowerText.includes(ind));
                     
                     const isGenericBtn = (className.includes('btn') || className.includes('button') || lowerText.includes('download')) && lowerHref.startsWith('http');
                     
@@ -399,6 +399,14 @@ app.post('/api/extract', async (req, res) => {
 
         finalLinks.sort((a, b) => a.episode.localeCompare(b.episode));
     } catch (e) { console.error("Extraction error:", e.message); }
+
+    // 🔥 MAIN CUSTOM ALERT FIX: Agar links nahi mile toh custom message bhejega
+    if (finalLinks.length === 0) {
+        return res.json({ 
+            finalLinks: [], 
+            message: "No HubCloud/GDFlix links available for this movie" 
+        });
+    }
 
     res.json({ finalLinks });
 });
