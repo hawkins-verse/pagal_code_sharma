@@ -64,7 +64,6 @@ app.get('/api/suggest', async (req, res) => {
     } catch (e) { res.json([]); }
 });
 
-// 🌟 CLEAN SEARCH LOGIC (PROVEN CONCEPT + EXTRA NAMES REMOVED) 🌟
 app.get('/api/search', async (req, res) => {
     const movieName = req.query.q;
     const movieUrlParam = req.query.url;
@@ -155,7 +154,6 @@ app.get('/api/search', async (req, res) => {
             }
         });
 
-        // Faltu aur pure title wale names hatane ke liye filter
         let cleanQualities = Array.from(qualities).filter(q => {
             const lq = q.toLowerCase();
             const isJustTitle = lq === titleText.toLowerCase();
@@ -173,7 +171,7 @@ app.get('/api/search', async (req, res) => {
     }
 });
 
-// 🔥 THE MASTERMIND EXTRACTION LOGIC (WITH HUBCLOUD CUSTOM ALERT FIX) 🔥
+// 🔥 THE MASTERMIND EXTRACTION LOGIC (PIXELDRAIN .DEV FIX INCLUDED) 🔥
 app.post('/api/extract', async (req, res) => {
     const { links } = req.body;
     let finalLinks = [];
@@ -212,7 +210,6 @@ app.post('/api/extract', async (req, res) => {
                     let href = $(el).attr('href');
                     if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
 
-                    // 🔥 GDFlix aur baaki saare hosting domains allow kiye taaki link miss na ho
                     const validDomains = ['hubcloud', 'gdflix', 'gamerxyt', 'm4ulinks', 'vifix', 'fastdl', 'filepress', 'gofile', 'dropgalaxy', 'clicknupload'];
                     const isValidHop = validDomains.some(domain => href.toLowerCase().includes(domain));
                     
@@ -359,12 +356,13 @@ app.post('/api/extract', async (req, res) => {
                         let exactName = text.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
                         if(!exactName || exactName.length > 30) exactName = "Download Server";
 
+                        // 🔥 PIXELDRAIN FIX: .com hٹا kar .dev kiya aur original URL structure lagaya
                         if (isPixel) {
                             if (jsPixelUrl) href = jsPixelUrl;
                             const id = href.match(/\/u\/([^/?#]+)/i)?.[1];
                             if (id) {
-                                href = `https://pixeldrain.com/api/file/${id}`;
-                                exactName = "PixelDrain (API Bypass)";
+                                href = `https://pixeldrain.dev/u/${id}`;
+                                // exactName ko overwrite karna band kar diya taaki original naam aaye
                             }
                         }
 
@@ -400,7 +398,6 @@ app.post('/api/extract', async (req, res) => {
         finalLinks.sort((a, b) => a.episode.localeCompare(b.episode));
     } catch (e) { console.error("Extraction error:", e.message); }
 
-    // 🔥 MAIN CUSTOM ALERT FIX: Agar links nahi mile toh custom message bhejega
     if (finalLinks.length === 0) {
         return res.json({ 
             finalLinks: [], 
