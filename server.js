@@ -364,7 +364,7 @@ app.post('/api/extract', async (req, res) => {
                             if (jsPixelUrl) href = jsPixelUrl;
                             const idMatch = href.match(/\/(?:u|api\/file)\/([^/?#]+)/i);
                             if (idMatch) {
-                                href = `https://pixeldrain.dev/u/${idMatch[1]}`;
+                                href = `https://pixeldrain.dev/api/file/${idMatch[1]}`;
                             }
                         }
 
