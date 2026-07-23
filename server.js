@@ -14,26 +14,13 @@ app.get('/', (req, res) => {
 });
 
 const HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.5',
-    'Connection': 'keep-alive',
-    'Upgrade-Insecure-Requests': '1'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
 };
 
 let currentBaseUrl = "https://new1.movies4u.clinic";
 
 function resolveUrl(base, relative) {
     try { return new URL(relative, base).href; } catch { return relative; }
-}
-
-// 🔥 HUBCLOUD CLOUDFLARE BYPASS FUNCTION 🔥
-function fixHubCloudUrl(url) {
-    const match = url.match(/(?:vifix\.site\/hubcloud|hubcloud\.[a-z]+\/(?:video|drive|out))\/([a-zA-Z0-9]+)/i);
-    if (match) {
-        return `https://hubcloud.one/drive/${match[1]}`;
-    }
-    return url;
 }
 
 app.post('/api/update-url', (req, res) => {
@@ -77,7 +64,7 @@ app.get('/api/suggest', async (req, res) => {
     } catch (e) { res.json([]); }
 });
 
-// 🌟 CLEAN SEARCH LOGIC (ROBUST NAME MATCHER) 🌟
+// 🌟 CLEAN SEARCH LOGIC (PROVEN CONCEPT + EXTRA NAMES REMOVED) 🌟
 app.get('/api/search', async (req, res) => {
     const movieName = req.query.q;
     const movieUrlParam = req.query.url;
@@ -158,11 +145,17 @@ app.get('/api/search', async (req, res) => {
                     }
 
                     qualities.add(currentQuality);
-                    downloadLinks.push({ quality: currentQuality, episode: episode, url: resolveUrl(movieUrl, href) });
+
+                    downloadLinks.push({ 
+                        quality: currentQuality, 
+                        episode: episode, 
+                        url: resolveUrl(movieUrl, href) 
+                    });
                 }
             }
         });
 
+        // Faltu aur pure title wale names hatane ke liye filter
         let cleanQualities = Array.from(qualities).filter(q => {
             const lq = q.toLowerCase();
             const isJustTitle = lq === titleText.toLowerCase();
@@ -180,7 +173,7 @@ app.get('/api/search', async (req, res) => {
     }
 });
 
-// 🔥 THE MASTERMIND EXTRACTION LOGIC (CLOUDFLARE BYPASS & PIXELDRAIN FIX) 🔥
+// 🔥 THE PROVEN ROBUST EXTRACTION LOGIC (NO MORE "NO LINKS FOUND") 🔥
 app.post('/api/extract', async (req, res) => {
     const { links } = req.body;
     let finalLinks = [];
@@ -190,7 +183,10 @@ app.post('/api/extract', async (req, res) => {
         const interPromises = links.map(async (linkObj) => {
             try {
                 let urlToFetch = linkObj.url;
-                
+                if (/^https:\/\/vifix\.site\/hubcloud\/([a-z0-9]+)$/i.test(urlToFetch)) {
+                    urlToFetch = `https://hubcloud.one/drive/${urlToFetch.split("/").pop()}`;
+                }
+
                 const lockedQuality = linkObj.quality || ""; 
                 const lockedEpisode = linkObj.episode || "Movie";
 
@@ -204,7 +200,7 @@ app.post('/api/extract', async (req, res) => {
 
                 const directHosts = ['hubcloud', 'gdflix', 'vifix', 'fastdl', 'filepress', 'gofile'];
                 if (directHosts.some(host => urlToFetch.toLowerCase().includes(host))) {
-                    return [{ genUrl: fixHubCloudUrl(urlToFetch), episode: lockedEpisode, quality: lockedQuality }];
+                    return [{ genUrl: urlToFetch, episode: lockedEpisode, quality: lockedQuality }];
                 }
 
                 const linkRes = await axios.get(urlToFetch, { headers: HEADERS, timeout: 12000 });
@@ -274,14 +270,17 @@ app.post('/api/extract', async (req, res) => {
                     }
                 }
 
+                // Fallback: Agar exact match na ho toh saare links le lo taaki "No links found" na aaye
                 if (matchedUrls.length === 0 && urlObjs.length > 0) {
                     matchedUrls = urlObjs; 
                 }
 
                 let urls = [];
                 matchedUrls.forEach(obj => {
-                    // Yahan bhi URL clean karega
-                    let href = fixHubCloudUrl(obj.href);
+                    let href = obj.href;
+                    if (/^https:\/\/vifix\.site\/hubcloud\/([a-z0-9]+)$/i.test(href)) {
+                        href = `https://hubcloud.one/drive/${href.split("/").pop()}`;
+                    }
                     urls.push({ genUrl: href, episode: obj.linkEpisode, quality: lockedQuality });
                 });
 
@@ -302,7 +301,7 @@ app.post('/api/extract', async (req, res) => {
                 
                 $('a.btn, a').each((i, a) => {
                     const href = $(a).attr('href');
-                    if (href && (href.includes('gamerxyt.com') || href.includes('hubcloud.php') || href.includes('fastdl') || href.includes('gdflix'))) {
+                    if (href && (href.includes('gamerxyt.com') || href.includes('hubcloud.php') || href.includes('fastdl'))) {
                         genUrls.push({ url: href, episode: item.episode, quality: item.quality });
                     }
                 });
@@ -352,7 +351,7 @@ app.post('/api/extract', async (req, res) => {
                     const isDrive = lowerHref.includes("googleusercontent.com") || lowerHref.includes("drive.google.com");
                     const isExternal = lowerHref.includes("mediafire") || lowerHref.includes("mega.nz") || lowerHref.includes("dropbox");
                     const isPixel = lowerHref.includes("pixeldrain");
-                    const hasLegacy = ['10gbps', 'zipdisk', 'ddl', 'fsl', 'server', 'buzz', 'gofile', 'clicknupload', 'filepress', 'gdflix'].some(ind => lowerHref.includes(ind) || lowerText.includes(ind));
+                    const hasLegacy = ['10gbps', 'zipdisk', 'ddl', 'fsl', 'server', 'buzz', 'gofile', 'clicknupload', 'filepress'].some(ind => lowerHref.includes(ind) || lowerText.includes(ind));
                     
                     const isGenericBtn = (className.includes('btn') || className.includes('button') || lowerText.includes('download')) && lowerHref.startsWith('http');
                     
@@ -362,25 +361,18 @@ app.post('/api/extract', async (req, res) => {
 
                         if (isPixel) {
                             if (jsPixelUrl) href = jsPixelUrl;
-                            const idMatch = href.match(/\/(?:u|api\/file)\/([^/?#]+)/i);
-                            if (idMatch) {
-                                href = `https://pixeldrain.dev/api/file/${idMatch[1]}`;
+                            const id = href.match(/\/u\/([^/?#]+)/i)?.[1];
+                            if (id) {
+                                href = `https://pixeldrain.dev/api/file/${id}`;
+                                exactName = "PixelDrain (API Bypass)";
                             }
                         }
 
                         extracted.push({ server: exactName, url: href, episode: item.episode, quality: item.quality });
                     }
                 });
-
-                if (extracted.length === 0) {
-                    extracted.push({ server: "Direct Link (Server Protected)", url: item.url, episode: item.episode, quality: item.quality });
-                }
-
                 return extracted;
-            } catch (e) { 
-                // Agar server completely reject karde
-                return [{ server: "Direct Link (Server Protected)", url: item.url, episode: item.episode, quality: item.quality }];
-            }
+            } catch (e) { return []; }
         });
 
         let rawFinalLinks = (await Promise.all(genPromises)).flat();
@@ -407,13 +399,6 @@ app.post('/api/extract', async (req, res) => {
 
         finalLinks.sort((a, b) => a.episode.localeCompare(b.episode));
     } catch (e) { console.error("Extraction error:", e.message); }
-
-    if (finalLinks.length === 0) {
-        return res.json({ 
-            finalLinks: [], 
-            message: "No HubCloud/GDFlix links available for this movie" 
-        });
-    }
 
     res.json({ finalLinks });
 });
